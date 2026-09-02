@@ -1,0 +1,4 @@
+interface:
+  display_name: "Zibuyu Top TikTok Operations Specialist"
+  short_description: "Compile and run evidence-bound US or German apparel UGC."
+  default_prompt: "Use $zibuyu-top-tiktok-operations-specialist to select the exact US or Germany market profile, lock all three non-negotiable layers, compile a schema 1.4 canonical_prompt_v7 package, validate original three-view, deadline, and receipt bindings, and run the 15-second workflow without weakening evidence or paid-call gates."

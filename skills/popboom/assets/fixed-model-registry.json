@@ -1,0 +1,76 @@
+{
+  "schema_version": "1.0",
+  "tenant_scope": "personal:zibuyu-top-tiktok-operations-specialist",
+  "endpoint": "https://tkvideo.zbycorp.com:5002/mcp",
+  "last_live_verification": "2026-08-19",
+  "presets": {
+    "德1": {
+      "asset_id": "asset-20260703091345-n2q24",
+      "identity_version": "de1-20260804-v1",
+      "identity_image_sha256": "9e3ba3779e005e1344072f066714b2a099e5315059c19fdcce92a53ca916367b",
+      "market": "Germany",
+      "spoken_language": "German",
+      "fit_stats_text": "168 cm / 52 kg / Größe S",
+      "thumbnail_url": "https://zby-ai-knowledge.oss-cn-hangzhou.aliyuncs.com/virtual_people_models/images/asset-20260703091345-n2q24.jpg",
+      "verified_at": "2026-08-04"
+    },
+    "德2": {
+      "asset_id": "asset-20260703091441-5rfz2",
+      "identity_version": "de2-20260804-v1",
+      "identity_image_sha256": "9af5518095e676fb6ab7abc046a1dbc7826b3e2c14a15f775d418f022b9548bc",
+      "market": "Germany",
+      "spoken_language": "German",
+      "fit_stats_text": "168 cm / 52 kg / Größe S",
+      "thumbnail_url": "https://zby-ai-knowledge.oss-cn-hangzhou.aliyuncs.com/virtual_people_models/images/asset-20260703091441-5rfz2.jpg",
+      "verified_at": "2026-08-04"
+    },
+    "美1": {
+      "asset_id": "asset-20260810141830-tbcnd",
+      "identity_version": "mei1-20260819-v1",
+      "identity_image_sha256": "f0834f80d842acca9f8df7bd874c3bf50ad5f935136a8ea0b071c2570b0e9d26",
+      "market": "United States",
+      "spoken_language": "American English",
+      "fit_stats_text": "5'6\" / 115 lb / Size S",
+      "source_image": "D:/Codex内容/美1.jpg",
+      "thumbnail_url": "https://knowledge.zbycorp.com/liujiyao/virtual_people_models/images/asset-20260810141830-tbcnd.jpg_20260810_141836_425222_992534.jpg?x-oss-process=image/resize,w_400,quality_85",
+      "appearance": "American female creator, age 28, warm medium complexion, long highlighted brunette waves, brown eyes, soft polished smile, confident TikTok try-on presence.",
+      "verified_at": "2026-08-19"
+    },
+    "美2": {
+      "asset_id": "asset-20260819170810-kbchw",
+      "identity_version": "mei2-20260819-v1",
+      "identity_image_sha256": "3af80c418d0e7b6660e6eaa84a65bb7882ddd893eb0ca34c5693be5681c7e533",
+      "market": "United States",
+      "spoken_language": "American English",
+      "fit_stats_text": "5'6\" / 200lb / Size 2XL",
+      "source_image": "D:/Codex内容/美2.jpg",
+      "thumbnail_url": "https://knowledge.zbycorp.com/liujiyao/virtual_people_models/images/asset-20260819170810-kbchw.jpg_20260819_170817_354953_0be6c4.jpg?x-oss-process=image/resize,w_400,quality_85",
+      "appearance": "American plus-size female creator, age 40, shoulder-length dark brunette waves, brown eyes, hoop earrings, friendly smile, approachable TikTok try-on presence.",
+      "verified_at": "2026-08-19"
+    },
+    "美3": {
+      "asset_id": "asset-20260819170855-8927v",
+      "identity_version": "mei3-20260819-v1",
+      "identity_image_sha256": "227e0c8ae6ee1e41e0c3098ff9ea5d9abd56e008f05c6c319a8b1854b2f89825",
+      "market": "United States",
+      "spoken_language": "American English",
+      "fit_stats_text": "5'6\" / 200lb / Size 2XL",
+      "source_image": "D:/Codex内容/美3.jpg",
+      "thumbnail_url": "https://zby-ai-knowledge.oss-cn-hangzhou.aliyuncs.com/liujiyao/virtual_people_models/images/asset-20260819170855-8927v.jpg_20260819_170901_792954_c40b8e.jpg",
+      "appearance": "Black American plus-size female creator, age 40, shoulder-length natural black curls, brown eyes, warm confident smile, friendly TikTok try-on presence.",
+      "verified_at": "2026-08-19"
+    },
+    "德3": {
+      "asset_id": "asset-20260819170940-ltnxb",
+      "identity_version": "de3-20260819-v1",
+      "identity_image_sha256": "4322f8f0c6e4cf45cbac52dd94304472f597e98073915b80cce5fb52897afdd5",
+      "market": "Germany",
+      "spoken_language": "German",
+      "fit_stats_text": "168 cm / 90 kg / Größe 2XL",
+      "source_image": "D:/Codex内容/德3.jpg",
+      "thumbnail_url": "https://zby-ai-knowledge.oss-cn-hangzhou.aliyuncs.com/liujiyao/virtual_people_models/images/asset-20260819170940-ltnxb.jpg_20260819_170946_930027_18cb52.jpg",
+      "appearance": "German plus-size female creator, age 40, shoulder-length blonde hair, light complexion, soft confident smile, calm natural TikTok try-on presence.",
+      "verified_at": "2026-08-19"
+    }
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "schema_version": "1.0",
+  "policy_id": "popboom-user-concurrency-12-v1",
+  "endpoint": "https://tkvideo.zbycorp.com:5002/mcp",
+  "updated_at": "2026-07-11T10:50:20Z",
+  "wave_control": {
+    "max_inflight": 12,
+    "max_inflight_source": "user",
+    "max_inflight_evidence": {
+      "kind": "user_explicit",
+      "allowed_max_inflight": 12,
+      "observed_at": "2026-07-11T09:26:02Z",
+      "evidence_id": "user-explicit-popboom-concurrency-12-v1",
+      "endpoint": "https://tkvideo.zbycorp.com:5002/mcp",
+      "server_version": null,
+      "source_run_id": null,
+      "source_ledger_sha256": null,
+      "observed_peak_inflight": null,
+      "successful_jobs": null,
+      "rate_limit_errors": null
+    },
+    "max_jobs_per_wave": 12,
+    "submission_strategy": "barrier_waves",
+    "fill_wave_without_wait": true,
+    "next_wave_release": "previous_wave_terminal"
+  },
+  "rate_limit_policy": {
+    "markers": [
+      "429",
+      "HTTP_429",
+      "rate_limit",
+      "rate_limited",
+      "too_many_requests",
+      "concurrency_limit",
+      "concurrency_limited"
+    ],
+    "effective_max_inflight": 1,
+    "before_next_paid_submission": true,
+    "accepted_jobs_action": "poll_only",
+    "latch_scope": "batch",
+    "event_log_field": "rate_limit_events",
+    "events_append_only": true,
+    "reset_condition": "new_run_id"
+  },
+  "history_policy": {
+    "revision_field": "ledger_revision",
+    "previous_hash_field": "previous_ledger_sha256",
+    "hash_canonicalization": "utf8_sorted_keys_compact_json",
+    "previous_snapshot_required_after_revision": 0,
+    "revision_zero_paid_allowed": false,
+    "paid_requires_history_verified": true,
+    "paid_authorization_field": "authorized_submission_job_keys",
+    "normal_authorized_batch_max": 12,
+    "rate_latched_authorized_batch_max": 1,
+    "rate_limit_events_prefix_immutable": true,
+    "accepted_record_id_immutable": true
+  }
+}

@@ -1,0 +1,81 @@
+{
+  "schema_version": "1.1",
+  "endpoint": "https://tkvideo.zbycorp.com:5002/mcp",
+  "transport": "streamable_http",
+  "observed_at": "2026-07-30T11:21:22Z",
+  "server": {
+    "name": "sora2-codex",
+    "version": "1.27.1",
+    "protocol_version": "2025-06-18",
+    "tool_count": 18,
+    "snapshot_observed_at": "2026-07-11",
+    "current_version_verified": false
+  },
+  "latest_tool_observation": {
+    "observed_at": "2026-07-30T09:08:32Z",
+    "tool_count": 19,
+    "server_version": null,
+    "generate_video_declared_duration_seconds": [5, 10, 30, 60, 120]
+  },
+  "upload_images": {
+    "local_reference_mode": "pretool_hook",
+    "hook_matcher": "^mcp__PopBoom__upload_images$",
+    "sentinel_scheme": "local-file",
+    "supported_local_extensions": ["jpg", "jpeg", "png", "webp", "gif", "bmp"],
+   "documented_max_image_bytes": 20971520,
+   "base64_terminal_output_forbidden": true,
+   "automatic_resize_or_recompression_forbidden": true,
+    "host_diagnostic_view_may_render_rewritten_input": true,
+    "recommended_normal_surface": "codex_desktop_new_task",
+    "cli_lazy_tool_loading_observed": true,
+    "required_preflight_action_when_inventory_only": "tool_search_exact_popboom_tool",
+    "live_original_upload_evidence": {
+      "validated_at": "2026-07-30T11:21:22Z",
+      "source_bytes": 2527927,
+      "remote_bytes": 2527927,
+      "source_sha256": "93af790e0f9ebc9f55e68590e00284133c32181714f47171cf429e58656a89bd",
+      "remote_sha256": "93af790e0f9ebc9f55e68590e00284133c32181714f47171cf429e58656a89bd",
+      "exact_byte_match": true,
+      "upload_succeeded": true
+    },
+   "offline_roundtrip_evidence": {
+      "validated_at": "2026-07-30T10:47:19Z",
+      "fixture_bytes": 2712442,
+      "fixture_sha256": "68bcc75025e14efe3a400faca0de945b5290cfd950c9169307d80518ba8f37db",
+      "roundtrip_sha256_matched": true,
+      "invalid_extension_denied": true,
+      "raw_local_path_denied": true
+    }
+  },
+  "generate_video": {
+    "declared_duration_seconds": [5, 10, 30, 60, 120],
+    "duration_15": {
+      "mode": "mcp_observed",
+      "valid_for_new_submission": true,
+      "accepted_evidence": {
+        "evidence_id": "popboom-15s-record-200704",
+        "observed_at": "2026-07-30T09:08:32Z",
+        "record_id": 200704,
+        "task_id": "cgt-20260730170321-rsrlh",
+        "requested_duration_seconds": 15,
+        "resolution": "480p",
+        "ratio": "9:16",
+        "model": "sd2",
+        "cost_points": 84,
+        "terminal_status": "succeeded"
+      },
+      "prior_negative_evidence": {
+        "observed_at": "2026-07-20",
+        "kind": "repeated_invalid_parameter",
+        "attempt_count": 6,
+        "live_declared_duration_seconds": [5, 10]
+      },
+      "supersedes_prior_negative_evidence": true,
+      "fallback_on_explicit_rejection": {
+        "condition": "invalid_parameter_without_record_id",
+        "action": "disable_mcp_observed_for_new_submissions_and_use_ui",
+        "never_resubmit_when_record_id_present": true
+      }
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "description": "Resolve approved local apparel image references immediately before PopBoom upload.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^(mcp__PopBoom__upload_images|mcp__PopBoom\\.upload_images|PopBoom/upload_images)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"& (Join-Path $env:PLUGIN_ROOT 'hooks/rewrite-popboom-local-upload.ps1')\"",
+            "commandWindows": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \"& (Join-Path $env:PLUGIN_ROOT 'hooks/rewrite-popboom-local-upload.ps1')\"",
+            "timeout": 60,
+            "statusMessage": "Preparing original PopBoom reference image"
+          }
+        ]
+      }
+    ]
+  }
+}
