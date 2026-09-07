@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["state", "note"],
+  "properties": {
+    "state": { "type": "string", "enum": ["prepared", "blocked", "checked"] },
+    "note": { "type": "string" }
+  }
+}

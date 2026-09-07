@@ -13,7 +13,6 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 
-LEGACY_BRAND_HASHTAG = "#Imily Bela"
 HASHTAG_RE = re.compile(r"^#[^\s#]+$")
 TERMINAL_STATES = {"succeeded", "failed"}
 
@@ -59,8 +58,17 @@ def _normalized_tag(value):
     return unicodedata.normalize("NFKC", value).casefold()
 
 
+def _tag_identity(value):
+    return "".join(
+        char for char in unicodedata.normalize("NFKC", str(value or "")).casefold()
+        if char.isalnum()
+    )
+
+
 def _valid_hashtag(value):
-    return value == LEGACY_BRAND_HASHTAG or bool(HASHTAG_RE.fullmatch(value))
+    if _tag_identity(value) == "imilybela":
+        return False
+    return bool(HASHTAG_RE.fullmatch(value))
 
 
 def _positive_int(value):
@@ -264,6 +272,12 @@ def self_test():
     broken = json.loads(json.dumps(batch, ensure_ascii=False))
     broken["variants"][0]["caption"] += " #Extra"
     cases.append(validate(broken, ledger).get("primary_error", {}).get("code") == "DELIVERY_CAPTION_HASHTAG")
+    broken = json.loads(json.dumps(batch, ensure_ascii=False))
+    broken["variants"][0]["hashtags"][0] = "#Imily Bela"
+    cases.append(validate(broken, ledger).get("primary_error", {}).get("code") == "DELIVERY_HASHTAG_INVALID")
+    broken = json.loads(json.dumps(batch, ensure_ascii=False))
+    broken["variants"][0]["hashtags"][0] = "#ImilyBela"
+    cases.append(validate(broken, ledger).get("primary_error", {}).get("code") == "DELIVERY_HASHTAG_INVALID")
     broken_ledger = json.loads(json.dumps(ledger, ensure_ascii=False))
     broken_ledger["jobs"].append(json.loads(json.dumps(broken_ledger["jobs"][0], ensure_ascii=False)))
     cases.append(validate(batch, broken_ledger).get("primary_error", {}).get("code") == "DELIVERY_JOB_KEY_DUPLICATE")

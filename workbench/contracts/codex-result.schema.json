@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "runId",
+    "phase",
+    "outcome",
+    "stageKey",
+    "currentTask",
+    "summary",
+    "nextAction",
+    "missingInputs",
+    "artifacts"
+  ],
+  "properties": {
+    "runId": { "type": "string" },
+    "phase": { "enum": ["prepare", "paid"] },
+    "outcome": {
+      "enum": [
+        "awaiting_paid_approval",
+        "needs_input",
+        "blocked",
+        "failed",
+        "delivered",
+        "submission_unknown"
+      ]
+    },
+    "stageKey": {
+      "enum": [
+        "intake_validation",
+        "product_analysis",
+        "three_view_generation",
+        "three_view_quality",
+        "script_and_voice",
+        "preflight_validation",
+        "paid_approval",
+        "popboom_generation",
+        "quality_and_delivery"
+      ]
+    },
+    "currentTask": { "type": "string" },
+    "summary": { "type": "string" },
+    "nextAction": { "type": "string" },
+    "missingInputs": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "label", "path"],
+        "properties": {
+          "kind": {
+            "enum": ["image", "video", "json", "text", "link", "other"]
+          },
+          "label": { "type": "string" },
+          "path": { "type": "string" }
+        }
+      }
+    }
+  }
+}

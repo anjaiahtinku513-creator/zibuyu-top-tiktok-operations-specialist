@@ -20,6 +20,14 @@ from typing import Any
 from urllib.parse import urlparse
 
 
+_output_helper_path = Path(__file__).resolve().parents[3] / "scripts" / "validator_result_output.py"
+_output_helper_spec = importlib.util.spec_from_file_location("zibuyu_validator_result_output", _output_helper_path)
+if _output_helper_spec is None or _output_helper_spec.loader is None:
+    raise RuntimeError(f"cannot load validator output helper: {_output_helper_path}")
+_result_output = importlib.util.module_from_spec(_output_helper_spec)
+_output_helper_spec.loader.exec_module(_result_output)
+
+
 try:
     import market_prompt_contract as _market_contract
 except ModuleNotFoundError:
@@ -94,7 +102,6 @@ PROMPT_V6_SERIALIZER_ID = _market_contract.LEGACY_PROMPT_SERIALIZER_ID
 PROMPT_V7_SERIALIZER_ID = _market_contract.PROMPT_SERIALIZER_ID
 INTERFACE_TAG_PATTERN = re.compile(r"@(?:图片|Image)[1-9][0-9]*")
 V5_GARMENT_TAG_PATTERN = re.compile(r"@Image([2-9]|[1-9][0-9]+)")
-LEGACY_BRAND_HASHTAG = "#Imily Bela"
 HASHTAG_PATTERN = re.compile(r"#[^\s#]+")
 POSITIVE_REPLACEMENT = "one_creator_same_garment_single_real_scene"
 REQUIRED_TRANSFER = {
@@ -476,7 +483,9 @@ def _valid_hashtag(value: Any) -> bool:
     if not isinstance(value, str):
         return False
     tag = value.strip()
-    return tag == LEGACY_BRAND_HASHTAG or bool(HASHTAG_PATTERN.fullmatch(tag))
+    if _norm(tag).replace(" ", "") == "imilybela":
+        return False
+    return bool(HASHTAG_PATTERN.fullmatch(tag))
 
 
 def _without_colors(text: Any, color_terms: list[Any]) -> str:
@@ -5771,6 +5780,14 @@ def run_self_test() -> dict[str, Any]:
             "expected_valid": expected_valid, "expected_primary_error": expected_error,
             "actual_primary_error": None if passed else actual.get("primary_error"),
         })
+    reports.append({
+        "name": "hashtag_bans_imily_bela",
+        "passed": (
+            _valid_hashtag("#Imily Bela") is False
+            and _valid_hashtag("#ImilyBela") is False
+            and _valid_hashtag("#TikTokShopFinds") is True
+        ),
+    })
     failed = [report for report in reports if not report["passed"]]
     if failed:
         return _result([_error("SELF_TEST_FAILED", "--self-test", "one or more self-tests failed", failed=failed)], mode="self-test", tests=reports, passed=len(reports) - len(failed), failed=len(failed))
@@ -5788,8 +5805,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--self-test", action="store_true", help="run in-memory test matrix")
     parser.add_argument("--compile", action="store_true", help="rebuild renderings and hashes from canonical timelines before validation")
     parser.add_argument("--output", help="write the compiled document to this JSON path; requires --compile")
+    parser.add_argument("--summary", action="store_true", help="print a compact non-authorizing summary; requires --result-file")
+    parser.add_argument("--result-file", help="atomically save complete validation JSON, including receipts")
+    output_ready = False
+    protected_paths = [Path(__file__), _output_helper_path,
+                       Path(__file__).with_name("market_prompt_contract.py"),
+                       Path(__file__).with_name("validate_streaming_plan.py")]
     try:
         args = parser.parse_args(argv)
+        source = args.json_source
+        if source and source != "-" and not source.lstrip().startswith(("{", "[")):
+            protected_paths.append(Path(source))
+        if args.output:
+            protected_paths.append(Path(args.output))
+        _result_output.validate_output_options(args.summary, args.result_file, protected_paths)
+        output_ready = True
         if args.self_test:
             if args.json_source is not None or args.compile or args.output is not None:
                 raise ValueError("--self-test does not accept json_source, --compile, or --output")
@@ -5810,6 +5840,9 @@ def main(argv: list[str] | None = None) -> int:
                 source_bytes = Path(source).read_bytes()
                 payload = source_bytes.decode("utf-8-sig")
             document = json.loads(payload)
+            if args.result_file:
+                protected_paths.extend(_result_output.document_input_paths(document))
+                _result_output.validate_output_options(args.summary, args.result_file, protected_paths)
             if args.compile:
                 document = compile_document(document)
                 compiled_bytes = (json.dumps(document, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
@@ -5824,10 +5857,19 @@ def main(argv: list[str] | None = None) -> int:
                 result = validate(document)
                 batch_compile_sha256 = hashlib.sha256(source_bytes).hexdigest()
             _attach_director_receipts(result, document, batch_compile_sha256)
+    except _result_output.ResultOutputError as exc:
+        output_ready = False
+        result = _result([_error("RESULT_OUTPUT_ERROR", "$", str(exc))])
     except (OSError, UnicodeError) as exc:
         result = _result([_error("INPUT_READ_ERROR", "$", str(exc))])
     except (json.JSONDecodeError, ValueError) as exc:
         result = _result([_error("INVALID_JSON", "$", str(exc))])
+    if output_ready:
+        try:
+            result = _result_output.prepare_output(result, summary=args.summary,
+                                                   result_file=args.result_file, protected_paths=protected_paths)
+        except _result_output.ResultOutputError as exc:
+            result = _result([_error("RESULT_OUTPUT_ERROR", "$", str(exc))])
     print(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
     return 0 if result["valid"] else 1
 

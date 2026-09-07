@@ -39,7 +39,6 @@ LEGACY_QUALITY_CONTRACT_ID = "zibuyu_ugc_quality_v2"
 LEGACY_PROMPT_SERIALIZER_ID = "canonical_prompt_v4"
 LEGACY_V5_PROMPT_SERIALIZER_ID = "canonical_prompt_v5"
 HASH_RE = re.compile(r"^[0-9a-f]{64}$")
-LEGACY_BRAND_HASHTAG = "#Imily Bela"
 HASHTAG_RE = re.compile(r"^#[^\s#]+$")
 VARIANT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 GARMENT_FIELDS = (
@@ -156,7 +155,9 @@ def _valid_hashtag(value: Any) -> bool:
     if not isinstance(value, str):
         return False
     tag = value.strip()
-    return tag == LEGACY_BRAND_HASHTAG or bool(HASHTAG_RE.fullmatch(tag))
+    if _norm(tag).replace(" ", "") == "imilybela":
+        return False
+    return bool(HASHTAG_RE.fullmatch(tag))
 
 
 def _required_string(obj: Any, field: str, path: str, errors: list[dict[str, Any]]) -> Any:
@@ -1097,6 +1098,14 @@ def self_test() -> dict[str, Any]:
         codes = {item["code"] for item in result.get("errors", [])}
         passed = result.get("valid") is should_pass and (expected is None or expected in codes)
         details.append({"name": name, "passed": passed})
+    details.append({
+        "name": "hashtag_bans_imily_bela",
+        "passed": (
+            _valid_hashtag("#Imily Bela") is False
+            and _valid_hashtag("#ImilyBela") is False
+            and _valid_hashtag("#TikTokShopFinds") is True
+        ),
+    })
 
     release = _release_fixture(good)
     release_errors = validate_release_binding(good, release, "a" * 64)

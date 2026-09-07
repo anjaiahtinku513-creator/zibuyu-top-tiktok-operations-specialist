@@ -16,6 +16,14 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 
+_output_helper_path = Path(__file__).resolve().parents[3] / "scripts" / "validator_result_output.py"
+_output_helper_spec = importlib.util.spec_from_file_location("zibuyu_validator_result_output", _output_helper_path)
+if _output_helper_spec is None or _output_helper_spec.loader is None:
+    raise RuntimeError(f"cannot load validator output helper: {_output_helper_path}")
+_result_output = importlib.util.module_from_spec(_output_helper_spec)
+_output_helper_spec.loader.exec_module(_result_output)
+
+
 ROUTES = {"mcp_declared", "mcp_observed", "mcp_provisional", "ui", "blocked"}
 STATES = {
     "planned", "submission_started", "submission_unknown", "submitted",
@@ -4070,8 +4078,24 @@ def main(argv=None):
         help="exact prior planned schema-1.3/v5 ledger required only for legacy_v5_exact_resume",
     )
     parser.add_argument("--self-test", action="store_true", help="run in-memory validator tests")
+    parser.add_argument("--summary", action="store_true", help="print a compact non-authorizing summary; requires --result-file")
+    parser.add_argument("--result-file", help="atomically save complete validation JSON, including exact outbound requests")
+    output_ready = False
+    skill_dir = Path(__file__).resolve().parent.parent
+    protected_paths = [Path(__file__), _output_helper_path,
+                       skill_dir / "assets" / "runtime-capabilities.json",
+                       skill_dir / "assets" / "execution-policy.json",
+                       skill_dir / "assets" / "fixed-model-registry.json"]
+    director_scripts = skill_dir.parent / "seedance-ugc-cn-director" / "scripts"
+    protected_paths.extend(director_scripts / name for name in (
+        "validate_batch_compile.py", "market_prompt_contract.py", "validate_streaming_plan.py"))
     try:
         args = parser.parse_args(argv)
+        protected_paths.extend(Path(value) for value in (
+            args.input, args.previous_ledger, args.batch_compile, args.legacy_source_ledger,
+            args.model_registry) if value and value != "-")
+        _result_output.validate_output_options(args.summary, args.result_file, protected_paths)
+        output_ready = True
         registry, runtime, execution_policy = load_assets(args.model_registry)
         if args.self_test:
             if args.input or args.previous_ledger or args.batch_compile or args.legacy_source_ledger:
@@ -4090,10 +4114,24 @@ def main(argv=None):
                 )
             batch_evidence = (load_batch_compile_evidence(args.batch_compile)
                               if args.batch_compile else None)
+            document = load_json_text(text)
+            if args.result_file:
+                for dependency in (document, previous, legacy_source,
+                                   batch_evidence.get("document") if batch_evidence else None):
+                    protected_paths.extend(_result_output.document_input_paths(dependency))
             result = Validator(registry, runtime, execution_policy, previous,
-                               batch_evidence, legacy_source).validate(load_json_text(text))
+                               batch_evidence, legacy_source).validate(document)
+    except _result_output.ResultOutputError as exc:
+        output_ready = False
+        result = failure("result_output_error", str(exc))
     except (OSError, UnicodeError, json.JSONDecodeError, DuplicateKeyError, ValueError) as exc:
         result = failure("input_error", str(exc))
+    if output_ready:
+        try:
+            result = _result_output.prepare_output(result, summary=args.summary,
+                                                   result_file=args.result_file, protected_paths=protected_paths)
+        except _result_output.ResultOutputError as exc:
+            result = failure("result_output_error", str(exc))
     emit(result)
     return 0 if result.get("valid") else 1
 

@@ -59,7 +59,7 @@ Observed account pattern from the July 2026 `nanettefei5` exports: high recommen
 - German hook angles to consider when evidence fits: `Basic, aber nicht langweilig`, `locker, aber nicht unförmig`, `schnell angezogen, aber trotzdem ordentlich`, `V-Ausschnitt sitzt sichtbar`, `Knopfleiste/Taschen/Nahtdetail direkt zeigen`, and `Brunch/Alltag/Urlaub` outfit use.
 - Each German script should include one low-friction comment trigger in caption or planning when it does not reduce purchase intent: `Schwarz oder Hellblau?`, `Offen oder geschlossen?`, `Urlaub oder Alltag?`, or `Jeans oder Shorts?`.
 - The close follows the German profile: ownership/soft verdict plus either no CTA or one brief `unten links` light-link cue. Caption may support profile/shop movement or a simple styling choice. Do not rely on passive descriptive captions or default to price/discount.
-- For Zibuyu apparel, section 12 hashtags are exactly five total. Choose five product-, market-, TikTok Shop-, occasion-, outfit-, or buyer-search-relevant tags; do not force a fixed brand hashtag.
+- For Zibuyu apparel, section 12 hashtags are exactly five total. Choose five product-, market-, TikTok Shop-, occasion-, outfit-, or buyer-search-relevant tags; do not force a fixed brand hashtag. Do not use `#Imily Bela`; replace it with a relevant non-brand tag so the total remains exactly five.
 
 ### Evidence-Backed Negative Contrast Hook
 

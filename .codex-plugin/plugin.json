@@ -1,7 +1,7 @@
 {
   "name": "zibuyu-top-tiktok-operations-specialist",
-  "version": "0.1.0+codex.20260823142222",
-  "description": "End-to-end Zibuyu TikTok apparel workflow with distinct US and Germany prompt compilers, evidence-bound creative direction, original-file PopBoom reference upload, and ledger-backed execution.",
+  "version": "0.1.0+codex.20260907023455",
+  "description": "Zibuyu US/DE apparel production, actual-video acceptance and complete copy delivery, followed by confirmation-gated TikTok scheduling; includes the reusable PopBoom publishing skill.",
   "author": {
     "name": "Zibuyu"
   },
@@ -19,8 +19,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Zibuyu Top TikTok Operations Specialist",
-    "shortDescription": "Compile, validate, and run US or German apparel UGC.",
-    "longDescription": "A Zibuyu operations workflow that separates exact Amazon catalog attributes, seller copy, direct customer reviews, buyer images, and excluded summaries before scriptwriting; maps buyer pains to independently evidenced garment claims; selects a distinct United States or Germany market prompt profile; then creates white-background three-view references, locks global audiovisual, asset-invariant, and per-shot physical deadlines, stages and auto-uploads original reference bytes through a trusted local-file Hook, and produces creator-led UGC with deterministic schema 1.4 canonical_prompt_v7 validation, ledger-backed PopBoom execution, polling, rendered-quality verdicts, and copy-ready captions with exactly 5 hashtags.",
+    "shortDescription": "Produce and accept apparel UGC, then prepare TikTok scheduling.",
+    "longDescription": "Retains the evidence-bound US and Germany schema 1.4 canonical_prompt_v7 apparel workflow: exact product/review analysis, identity-neutral three-views, fixed-model direction, original-file upload, PopBoom generation, actual-video acceptance, and copy-ready captions with exactly 5 unique relevant non-brand hashtags. Only after the whole batch is accepted and delivered, prepares channel/product binding and local-time TikTok scheduling through the bundled zibuyu-popboom-auto-publish skill, with final-table authorization and verified scheduling/publication states. Production-only requests remain supported; the standalone publishing skill stays available for existing videos.",
     "developerName": "Zibuyu",
     "category": "Productivity",
     "capabilities": [
@@ -31,7 +31,8 @@
     "defaultPrompt": [
       "Use \u7f8e1, this Amazon URL, and product images to compile a US-profile v1.4 video with aligned proof and voice.",
       "Use \u5fb71 and these garment photos to compile a German-profile schema 1.4 video with aligned claims, actions, and German voice.",
-      "Create three-views, validate prompts, upload originals, submit PopBoom videos, poll, and deliver captions."
+      "Produce and inspect the whole apparel batch, deliver videos and five-tag captions, then prepare TikTok scheduling for my final confirmation.",
+      "Use my completed, accepted batch with the account, PID, and date to prepare scheduled publishing without generating new videos."
     ],
     "composerIcon": "./assets/zibuyu-logo.png",
     "logo": "./assets/zibuyu-logo.png",

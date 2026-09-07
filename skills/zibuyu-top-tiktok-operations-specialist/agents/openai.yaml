@@ -1,4 +1,4 @@
 interface:
   display_name: "Zibuyu Top TikTok Operations Specialist"
-  short_description: "Compile and run evidence-bound US or German apparel UGC."
-  default_prompt: "Use $zibuyu-top-tiktok-operations-specialist to select the exact US or Germany market profile, lock all three non-negotiable layers, compile a schema 1.4 canonical_prompt_v7 package, validate original three-view, deadline, and receipt bindings, and run the 15-second workflow without weakening evidence or paid-call gates."
+  short_description: "Produce and QA apparel UGC, then prepare approved publishing."
+  default_prompt: "Use $zibuyu-top-tiktok-operations-specialist to run the existing US or Germany schema 1.4 apparel production workflow, inspect and deliver the whole batch with five-tag captions, then prepare scheduled publishing for final confirmation unless I request production only."
