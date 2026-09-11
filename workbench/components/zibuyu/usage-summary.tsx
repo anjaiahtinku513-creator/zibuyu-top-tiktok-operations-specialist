@@ -2,6 +2,7 @@ import type { UsageSummary } from '@/lib/zibuyu';
 
 const phaseNames: Record<string, string> = {
   prepare: '制作准备',
+  'prepare-resume': '准备续跑',
   paid: '生成与质检',
   classify: '颜色识别',
   'publish-prepare': '排期准备',
@@ -38,7 +39,7 @@ export function UsageSummaryCard({
             {usage.attemptCount} 次执行（含失败尝试）。
             {usage.usageComplete
               ? '已收到各次执行的用量回执。'
-              : '仍有执行未结束或用量未提供，当前记录不完整。'}
+              : '部分执行缺少结束或用量回执，当前记录不完整。'}
           </p>
           <div className="mt-4 overflow-x-auto">
             <table className="w-full min-w-[620px] text-left text-sm tabular-nums">
@@ -61,7 +62,7 @@ export function UsageSummaryCard({
                       <p>
                         {phaseNames[attempt.phase] ?? attempt.phase} ·{' '}
                         {attempt.state === 'running'
-                          ? '执行中'
+                          ? '未收到结束回执'
                           : attempt.state === 'failed'
                             ? '失败'
                             : '结束'}
@@ -81,7 +82,7 @@ export function UsageSummaryCard({
                     </td>
                     <td className="py-3">
                       {attempt.durationMs == null
-                        ? '未结束'
+                        ? '未提供'
                         : `${Math.round(attempt.durationMs / 1000)} 秒`}
                     </td>
                   </tr>

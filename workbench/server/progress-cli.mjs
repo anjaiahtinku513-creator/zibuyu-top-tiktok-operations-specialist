@@ -4,7 +4,7 @@ import { transitionStatus } from './state.mjs';
 
 function readArg(name, fallback = '') {
   const index = process.argv.indexOf(`--${name}`);
-  return index >= 0 ? process.argv[index + 1] ?? fallback : fallback;
+  return index >= 0 ? (process.argv[index + 1] ?? fallback) : fallback;
 }
 
 const runDir = path.resolve(readArg('run-dir'));
@@ -18,9 +18,15 @@ if (!runDir || !stageKey || !currentTask) {
 }
 
 const status = await transitionStatus(runDir, {
-  stageKey,
-  state,
-  currentTask,
+  // Only the runner can open approval, after committing result-prepare.json.
+  // A model's progress report can arrive before its structured output exists.
+  stageKey:
+    state === 'awaiting_paid_approval' ? 'preflight_validation' : stageKey,
+  state: state === 'awaiting_paid_approval' ? 'running' : state,
+  currentTask:
+    state === 'awaiting_paid_approval'
+      ? '正在整理准备产物与授权清单'
+      : currentTask,
   note,
 });
 

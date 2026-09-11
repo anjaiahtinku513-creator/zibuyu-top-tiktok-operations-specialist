@@ -1,3 +1,22 @@
+## 2026-09-11 — Confirmed caption and Beijing scheduling contract
+
+- Full caption plus exactly five tags in video_title; no repeated mapping confirmation.
+- DST-aware account-local to Beijing +08:00 requests, including date rollover.
+- User-confirmed Beijing interpretation of bare PopBoom readbacks; preserve raw evidence and duplicate protection.
+- Manual user QA and existing explicit same-scope publication authorization are reused.
+- Synchronized workbench, plugin, standalone skill, package and regression tests.
+
+# 2026-09-08
+
+插件：`0.1.0+codex.20260908143002`。
+
+- 独立发布技能与整批制作后的发布流程统一加入逐条平台回查审核；每条通过必要审核后才继续新提交。
+- 排期状态与审核状态分开。缺少时区/身份/正文证据时待审核，已证实的时间点或内容差异标为不匹配，不能把创建回显或本地计划包装成已审核的平台结果。
+- 时间审核使用UTC时间点比较，支持等价偏移、跨日与日期对应的夏令时；`+08:00`示例不再被误读为接口只允许北京时间。时区不明确时不猜测实际执行时间。
+- 新增只读时间审核器与离线回归测试；审核失败保留原排期ID和未提交任务，不自动重发、不绕过原授权和生产QA。
+
+本次优化不调用真实发布接口，也不修改既有视频排期。
+
 # 2026-09-07
 
 插件：`0.1.0+codex.20260907023455`。

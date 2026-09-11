@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 
 
 HASHTAG_RE = re.compile(r"^#[^\s#]+$")
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 TERMINAL_STATES = {"succeeded", "failed"}
 
 
@@ -79,8 +80,32 @@ def _error(code, path, message):
     return {"code": code, "path": path, "message": message}
 
 
-def validate(batch, ledger):
+def validate(batch, ledger, *, batch_compile_sha256=None):
     errors = []
+    expected_sha256 = ledger.get("batch_compile_sha256")
+    binding = {
+        "status": "legacy_unbound",
+        "measured_sha256": batch_compile_sha256,
+        "ledger_sha256": expected_sha256,
+    }
+    if expected_sha256 is None:
+        binding["reason"] = "legacy ledger has no batch_compile_sha256; identifier binding only"
+    elif not isinstance(expected_sha256, str) or not SHA256_RE.fullmatch(expected_sha256):
+        binding["status"] = "invalid"
+        errors.append(_error("DELIVERY_COMPILE_HASH_INVALID", "$ledger.batch_compile_sha256", "ledger compile hash must be a lowercase SHA-256 digest"))
+    elif batch_compile_sha256 is None:
+        binding["status"] = "unverified"
+        errors.append(_error("DELIVERY_COMPILE_HASH_UNVERIFIED", "$batch", "a hash-bound ledger requires the measured original batch compile hash"))
+    elif batch_compile_sha256 != expected_sha256:
+        binding["status"] = "mismatch"
+        errors.append(_error("DELIVERY_COMPILE_HASH_MISMATCH", "$batch", "original batch compile bytes do not match the ledger hash"))
+    else:
+        binding["status"] = "verified"
+    if batch_compile_sha256 is not None and (
+        not isinstance(batch_compile_sha256, str) or not SHA256_RE.fullmatch(batch_compile_sha256)
+    ):
+        errors.append(_error("DELIVERY_COMPILE_HASH_INVALID", "$batch", "measured compile hash must be a lowercase SHA-256 digest"))
+
     for field in ("batch_compile_id", "sku_family_id"):
         batch_value = batch.get(field)
         ledger_value = ledger.get(field)
@@ -121,6 +146,7 @@ def validate(batch, ledger):
         variant_map[variant_id] = variant
 
     items = []
+    caption_normalizations = []
     job_keys = set()
     for index, job in enumerate(jobs):
         path = f"$ledger.jobs[{index}]"
@@ -149,9 +175,8 @@ def validate(batch, ledger):
             caption = ""
         else:
             caption = " ".join(caption.split())
-            if "#" in caption:
-                errors.append(_error("DELIVERY_CAPTION_HASHTAG", f"$batch.variants[{variant_id}].caption", "caption text must not contain hashtags"))
 
+        hashtag_error_count = len(errors)
         hashtags = variant.get("hashtags")
         if not isinstance(hashtags, list) or len(hashtags) != 5:
             errors.append(_error("DELIVERY_HASHTAG_COUNT", f"$batch.variants[{variant_id}].hashtags", "exactly five hashtags are required"))
@@ -163,6 +188,27 @@ def validate(batch, ledger):
             if len({_normalized_tag(tag) for tag in normalized}) != 5:
                 errors.append(_error("DELIVERY_HASHTAG_DUPLICATE", f"$batch.variants[{variant_id}].hashtags", "hashtags must be unique"))
             hashtags = normalized
+
+        if "#" in caption:
+            tokens = caption.split()
+            body = " ".join(tokens[:-5])
+            if (
+                len(errors) == hashtag_error_count
+                and len(tokens) > 5
+                and tokens[-5:] == hashtags
+                and body
+                and "#" not in body
+            ):
+                # Materialize a delivery view; never rewrite the paid compile.
+                caption_normalizations.append({
+                    "variant_id": variant_id,
+                    "rule": "exact_five_hashtag_suffix_v1",
+                    "source_caption_sha256": hashlib.sha256(variant["caption"].encode("utf-8")).hexdigest(),
+                    "whitespace_normalized_copy_preserved": True,
+                })
+                caption = body
+            else:
+                errors.append(_error("DELIVERY_CAPTION_HASHTAG", f"$batch.variants[{variant_id}].caption", "caption hashtags must be exactly the five declared tags, in order, as a terminal suffix after non-empty hashtag-free text"))
 
         record_id = job.get("record_id")
         video_url = job.get("video_url")
@@ -218,8 +264,13 @@ def validate(batch, ledger):
             f"terminal delivery is missing compiled variants: {', '.join(missing_variants)}",
         ))
     errors.sort(key=lambda item: (item["code"], item["path"]))
+    provenance = {
+        "batch_compile_sha256": batch_compile_sha256,
+        "batch_compile_binding": binding,
+        "caption_normalizations": caption_normalizations,
+    }
     if errors:
-        return {"valid": False, "primary_error": errors[0], "errors": errors}
+        return {"valid": False, "primary_error": errors[0], "errors": errors, **provenance}
     return {
         "valid": True,
         "schema_version": "1.0",
@@ -227,6 +278,7 @@ def validate(batch, ledger):
         "item_count": len(items),
         "delivery_sha256": _canonical_hash(items),
         "items": items,
+        **provenance,
     }
 
 
@@ -281,6 +333,60 @@ def self_test():
     broken_ledger = json.loads(json.dumps(ledger, ensure_ascii=False))
     broken_ledger["jobs"].append(json.loads(json.dumps(broken_ledger["jobs"][0], ensure_ascii=False)))
     cases.append(validate(batch, broken_ledger).get("primary_error", {}).get("code") == "DELIVERY_JOB_KEY_DUPLICATE")
+
+    combined = json.loads(json.dumps(batch, ensure_ascii=False))
+    source_caption = combined["variants"][0]["caption"]
+    tags = combined["variants"][0]["hashtags"]
+    combined_caption = source_caption + " " + " ".join(tags)
+    combined["variants"][0]["caption"] = combined_caption
+    original_combined = json.dumps(combined, ensure_ascii=False, sort_keys=True)
+    result = validate(combined, ledger)
+    cases.append(
+        result.get("valid") is True
+        and result["items"][0]["caption"] == source_caption
+        and result["items"][0]["copy_ready_caption"] == combined_caption
+        and result["caption_normalizations"][0]["rule"] == "exact_five_hashtag_suffix_v1"
+        and json.dumps(combined, ensure_ascii=False, sort_keys=True) == original_combined
+    )
+    for bad_caption in (
+        combined_caption + " #Extra",
+        source_caption + " " + " ".join(tags[:-1]),
+        source_caption + " " + " ".join(reversed(tags)),
+        source_caption + " #Inside " + " ".join(tags),
+        " ".join(tags),
+        source_caption + " " + tags[0] + " " + " ".join(tags),
+        source_caption + " " + " ".join([tags[0].lower(), *tags[1:]]),
+    ):
+        broken = json.loads(original_combined)
+        broken["variants"][0]["caption"] = bad_caption
+        cases.append(validate(broken, ledger).get("primary_error", {}).get("code") == "DELIVERY_CAPTION_HASHTAG")
+    for invalid_tags, expected_code in (
+        ([*tags[:-1], tags[0]], "DELIVERY_HASHTAG_DUPLICATE"),
+        (["#ImilyBela", *tags[1:]], "DELIVERY_HASHTAG_INVALID"),
+        (["#Imily Bela", *tags[1:]], "DELIVERY_HASHTAG_INVALID"),
+    ):
+        broken = json.loads(original_combined)
+        broken["variants"][0]["hashtags"] = invalid_tags
+        broken["variants"][0]["caption"] = source_caption + " " + " ".join(invalid_tags)
+        codes = {error["code"] for error in validate(broken, ledger).get("errors", [])}
+        cases.append(expected_code in codes)
+
+    bound_ledger = json.loads(json.dumps(ledger, ensure_ascii=False))
+    measured_sha256 = hashlib.sha256(original_combined.encode("utf-8")).hexdigest()
+    bound_ledger["batch_compile_sha256"] = measured_sha256
+    result = validate(combined, bound_ledger, batch_compile_sha256=measured_sha256)
+    cases.append(result.get("valid") is True and result["batch_compile_binding"]["status"] == "verified")
+    cases.append(validate(combined, bound_ledger, batch_compile_sha256="b" * 64).get("primary_error", {}).get("code") == "DELIVERY_COMPILE_HASH_MISMATCH")
+    cases.append(validate(combined, bound_ledger).get("primary_error", {}).get("code") == "DELIVERY_COMPILE_HASH_UNVERIFIED")
+    bound_ledger["batch_compile_sha256"] = "invalid"
+    cases.append(validate(combined, bound_ledger, batch_compile_sha256=measured_sha256).get("primary_error", {}).get("code") == "DELIVERY_COMPILE_HASH_INVALID")
+    result = validate(combined, ledger, batch_compile_sha256=measured_sha256)
+    cases.append(
+        result.get("valid") is True
+        and result["batch_compile_sha256"] == measured_sha256
+        and result["batch_compile_binding"]["status"] == "legacy_unbound"
+        and bool(result["batch_compile_binding"].get("reason"))
+    )
     return {
         "valid": all(cases),
         "self_test": {"passed": sum(cases), "failed": len(cases) - sum(cases)},
@@ -303,7 +409,14 @@ def main(argv=None):
         else:
             if not args.batch_compile or not args.ledger:
                 raise ValueError("batch_compile and ledger paths are required")
-            result = validate(_load(Path(args.batch_compile)), _load(Path(args.ledger)))
+            # Hash and parse the same read so the receipt binds the exact input bytes.
+            batch_bytes = Path(args.batch_compile).read_bytes()
+            batch = json.loads(batch_bytes.decode("utf-8-sig"), object_pairs_hook=_object_no_duplicates)
+            result = validate(
+                batch,
+                _load(Path(args.ledger)),
+                batch_compile_sha256=hashlib.sha256(batch_bytes).hexdigest(),
+            )
     except (OSError, UnicodeError, json.JSONDecodeError, DuplicateKeyError, ValueError) as exc:
         error = _error("DELIVERY_INPUT_ERROR", "$", str(exc))
         result = {"valid": False, "primary_error": error, "errors": [error]}

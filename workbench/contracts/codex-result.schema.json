@@ -20,6 +20,7 @@
       "enum": [
         "awaiting_paid_approval",
         "needs_input",
+        "needs_review",
         "blocked",
         "failed",
         "delivered",

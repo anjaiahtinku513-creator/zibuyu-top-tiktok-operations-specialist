@@ -25,19 +25,19 @@ import {
 test('account-local slots use actual New York and Berlin winter/summer offsets', () => {
   assert.equal(
     scheduleIso('2027-01-10', '07:00', 'America/New_York'),
-    '2027-01-10T07:00:00-05:00',
+    '2027-01-10T20:00:00+08:00',
   );
   assert.equal(
     scheduleIso('2027-07-10', '07:00', 'America/New_York'),
-    '2027-07-10T07:00:00-04:00',
+    '2027-07-10T19:00:00+08:00',
   );
   assert.equal(
     scheduleIso('2027-01-10', '18:00', 'Europe/Berlin'),
-    '2027-01-10T18:00:00+01:00',
+    '2027-01-11T01:00:00+08:00',
   );
   assert.equal(
     scheduleIso('2027-07-10', '18:00', 'Europe/Berlin'),
-    '2027-07-10T18:00:00+02:00',
+    '2027-07-11T00:00:00+08:00',
   );
 });
 test('extra colors cannot silently roll over; explicitly chosen carryover preserves times', () => {
@@ -95,23 +95,70 @@ test('past times, occupied slots and uncertain daily allocations block schedulin
     /三条/,
   );
 });
-test('model-written claims cannot unlock the unresolved full-caption interface', () => {
-  assert.equal(CAPTION_TRANSPORT.verified, false);
+test('standing caption contract needs no per-run model proof or invented length limit', () => {
+  assert.equal(CAPTION_TRANSPORT.verified, true);
+  assert.equal(CAPTION_TRANSPORT.field, 'video_title');
+  assert.equal(CAPTION_TRANSPORT.maxLength, null);
+  const caption =
+    'Eine Bluse. #Damenmode #Alltagsoutfit #Tunika #JeansLook #Sommer';
+  const proposal = {
+    checkedAt: new Date().toISOString(),
+    channel: { id: 'channel', username: 'ryleighhsing9', active: true },
+    product: {
+      id: '123',
+      pid: '123',
+      channelId: 'channel',
+      title: 'Bluse',
+      evidenceSource: 'live-product',
+    },
+  };
+  const snapshot = {
+    items: [
+      {
+        model_preset: '德1',
+        variant_id: 'black',
+        record_id: 1,
+        copy_ready_caption: caption,
+        video_url: 'https://example.com/video.mp4',
+      },
+    ],
+  };
+  const result = validateProposal(proposal, snapshot, {
+    accountCode: '德1',
+    pid: '123',
+    date: '2030-09-15',
+  });
+  assert.equal(result.rows[0].request.video_title, caption);
+  assert.equal(
+    result.rows[0].request.scheduled_time,
+    '2030-09-15T13:00:00+08:00',
+  );
   assert.throws(
     () =>
       validateProposal(
-        {
-          captionMapping: {
-            field: 'video_title',
-            evidenceSource: 'invented',
-            evidenceExcerpt: 'trust me',
-            maxLength: 10000,
-          },
-        },
-        { items: [] },
-        {},
+        { ...proposal, captionMapping: { field: 'short_title' } },
+        snapshot,
+        { accountCode: '德1', pid: '123', date: '2030-09-15' },
       ),
-    /仍待验证/,
+    /video_title/,
+  );
+});
+test('Beijing midnight crosses date and DST gaps/overlaps do not silently normalize', () => {
+  assert.equal(
+    scheduleIso('2026-09-15', '18:00', 'Europe/Berlin'),
+    '2026-09-16T00:00:00+08:00',
+  );
+  assert.equal(
+    scheduleIso('2026-09-15', '18:00', 'America/New_York'),
+    '2026-09-16T06:00:00+08:00',
+  );
+  assert.throws(
+    () => scheduleIso('2027-03-14', '02:30', 'America/New_York'),
+    /不存在/,
+  );
+  assert.throws(
+    () => scheduleIso('2027-11-07', '01:30', 'America/New_York'),
+    /重复/,
   );
 });
 test('an ID or empty evidence never proves scheduled, and unknown stays unknown', () => {
@@ -128,28 +175,37 @@ test('an ID or empty evidence never proves scheduled, and unknown stays unknown'
     observedAction({ state: 'dispatching' }).state,
     'submission_unknown',
   );
-  assert.equal(observedAction({ state: 'claimed' }).state, 'not_dispatched');
+  assert.equal(observedAction({ state: 'claimed' }).state, 'claimed');
 });
-test('only a matching explicit platform readback can establish scheduled or published', () => {
+test('matching IDs in model-written evidence cannot replace completed MCP event provenance', () => {
   const base = {
     scheduleId: 's1',
     observedAt: new Date().toISOString(),
-    verificationEvidence: { schedule_id: 's1', status: 'scheduled' },
+    verificationEvidence: {
+      tool: 'check_publish',
+      result: { schedule_id: 's1', status: 'scheduled' },
+    },
   };
-  assert.equal(observedAction(base).state, 'scheduled');
+  assert.equal(observedAction(base).state, 'receipt_received');
   assert.equal(
     observedAction({
       ...base,
-      verificationEvidence: { schedule_id: 'different', status: 'published' },
+      verificationEvidence: {
+        tool: 'check_publish',
+        result: { schedule_id: 'different', status: 'published' },
+      },
     }).state,
     'receipt_received',
   );
   assert.equal(
     observedAction({
       ...base,
-      verificationEvidence: { schedule_id: 's1', status: 'published' },
+      verificationEvidence: {
+        tool: 'check_publish',
+        result: { schedule_id: 's1', status: 'published' },
+      },
     }).state,
-    'published',
+    'receipt_received',
   );
 });
 async function fixture(t) {

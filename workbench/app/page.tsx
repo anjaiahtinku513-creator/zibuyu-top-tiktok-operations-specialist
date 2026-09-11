@@ -1,7 +1,7 @@
 'use client';
 
 import type { CSSProperties } from 'react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import {
   Activity,
@@ -71,6 +71,8 @@ export default function Home() {
   const [health, setHealth] = useState<Health | null>(null);
   const [runs, setRuns] = useState<RunStatus[]>([]);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const activeRunRef = useRef<string | null>(null);
+  const detailRequestRef = useRef(0);
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [initializing, setInitializing] = useState(true);
@@ -85,15 +87,25 @@ export default function Home() {
   }, []);
 
   const loadRun = useCallback(async (runId: string, showLoading = true) => {
+    if (activeRunRef.current !== runId) return;
+    const requestNumber = ++detailRequestRef.current;
     if (showLoading) setLoadingDetail(true);
     try {
       const result = await readJsonResponse<RunDetail>(
         await fetch(`/api/runs/${encodeURIComponent(runId)}`),
       );
-      setDetail(result);
+      if (
+        activeRunRef.current === runId &&
+        detailRequestRef.current === requestNumber
+      )
+        setDetail(result);
       return result;
     } finally {
-      if (showLoading) setLoadingDetail(false);
+      if (
+        activeRunRef.current === runId &&
+        detailRequestRef.current === requestNumber
+      )
+        setLoadingDetail(false);
     }
   }, []);
 
@@ -125,6 +137,14 @@ export default function Home() {
   }, [refreshRuns]);
 
   useEffect(() => {
+    if (!activeRunId || view !== 'detail') return;
+    const timer = window.setInterval(() => {
+      void loadRun(activeRunId, false).catch(() => {});
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [activeRunId, view, loadRun]);
+
+  useEffect(() => {
     const timer = window.setTimeout(() => {
       if (window.location.hash === '#publishing') setView('publishing');
       void initialize();
@@ -152,7 +172,12 @@ export default function Home() {
     );
     const onStatus = (event: MessageEvent<string>) => {
       const status = JSON.parse(event.data) as RunStatus;
-      setDetail((current) => (current ? { ...current, status } : current));
+      if (activeRunRef.current !== status.runId) return;
+      setDetail((current) =>
+        current?.intake.runId === status.runId
+          ? { ...current, status }
+          : current,
+      );
       setRuns((current) => {
         const exists = current.some((item) => item.runId === status.runId);
         const next = exists
@@ -165,8 +190,13 @@ export default function Home() {
       void loadRun(activeRunId, false).catch(() => {});
     };
     source.addEventListener('status', onStatus as EventListener);
+    source.addEventListener('error', () => {
+      // Restarting the local bridge rotates its session cookie/token.
+      // Renew it so an already-open workbench reconnects automatically.
+      void initialize();
+    });
     return () => source.close();
-  }, [activeRunId, token, loadRun]);
+  }, [activeRunId, token, loadRun, initialize]);
 
   const dockStatus = useMemo(() => {
     if (detail?.status && detail.status.runId === activeRunId)
@@ -183,6 +213,7 @@ export default function Home() {
 
   const openRun = useCallback(
     async (runId: string) => {
+      activeRunRef.current = runId;
       setActiveRunId(runId);
       setView('detail');
       setDetail(null);
@@ -208,12 +239,14 @@ export default function Home() {
       ...current.filter((item) => !ids.has(item.runId)),
     ]);
     if (createdRuns.length > 1) {
+      activeRunRef.current = null;
       setActiveRunId(null);
       setDetail(null);
       setView('queue');
       void refreshRuns().catch(() => {});
       return;
     }
+    activeRunRef.current = runId;
     setActiveRunId(runId);
     setView('detail');
     void loadRun(runId).catch((error) => {
@@ -221,10 +254,12 @@ export default function Home() {
     });
   }
 
-  async function approvePaidPhase(variantIds: string[]) {
+  async function approvePaidPhase(reviewedRunId: string, variantIds: string[]) {
     if (!token || !activeRunId) throw new Error('本地会话已失效，请刷新页面');
+    if (reviewedRunId !== activeRunRef.current)
+      throw new Error('当前模特已切换，请重新核对后确认');
     const response = await fetch(
-      `/api/runs/${encodeURIComponent(activeRunId)}/approve`,
+      `/api/runs/${encodeURIComponent(reviewedRunId)}/approve`,
       {
         method: 'POST',
         headers: {
@@ -235,7 +270,7 @@ export default function Home() {
       },
     );
     await readJsonResponse(response);
-    await Promise.all([loadRun(activeRunId, false), refreshRuns()]);
+    await Promise.all([loadRun(reviewedRunId, false), refreshRuns()]);
   }
 
   const queueCount = runs.filter((run) => run.state !== 'delivered').length;
@@ -351,11 +386,14 @@ export default function Home() {
 
             {view === 'detail' ? (
               <TaskDetailView
+                key={activeRunId}
                 onOpenRun={openRun}
-                detail={detail}
+                detail={detail?.intake.runId === activeRunId ? detail : null}
                 loading={loadingDetail}
                 onBack={() => setView('queue')}
-                onRefresh={() => activeRunId && void loadRun(activeRunId)}
+                onRefresh={() =>
+                  activeRunId && void loadRun(activeRunId).catch(() => {})
+                }
                 onApprove={approvePaidPhase}
                 onPublish={() => {
                   setPublishRunId(activeRunId);

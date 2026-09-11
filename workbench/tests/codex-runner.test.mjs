@@ -21,7 +21,10 @@ test('every production batch starts a fresh gpt-5.5 high session', () => {
   );
   assert.ok(args.includes('model_reasoning_effort="high"'));
   assert.ok(!args.includes('resume'));
-  assert.equal(CODEX_EXECUTION_POLICY.conversationPolicy, 'new-session-per-production-batch');
+  assert.equal(
+    CODEX_EXECUTION_POLICY.conversationPolicy,
+    'new-session-per-production-batch',
+  );
 });
 
 test('paid phase resumes only the current batch session with the same model policy', () => {
@@ -38,6 +41,11 @@ test('paid phase resumes only the current batch session with the same model poli
   assert.ok(args.includes(sessionId));
   assert.ok(args.includes('gpt-5.5'));
   assert.ok(args.includes('model_reasoning_effort="high"'));
+  assert.ok(args.includes('--approve-for-me'));
+  assert.ok(
+    !args.includes('--sandbox'),
+    'automatic review selects workspace-write; the CLI rejects an additional sandbox flag',
+  );
 });
 
 test('session isolation rejects cross-batch reuse and missing paid session IDs', () => {

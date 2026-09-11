@@ -56,6 +56,10 @@ MOTION_RICH_VISUAL_FIELDS = (
 )
 EVIDENCE_RICH_VISUAL_FIELDS = ("evidence_ids", "pain_point_id")
 MARKET_RICH_VISUAL_FIELDS = ("spoken_language", "proof_endpoint", "scene_id")
+SEQUENTIAL_LIVE_PROOF_FIELD = "sequential_live_proof"
+SEQUENTIAL_LIVE_PROOF_ACTIONS = {
+    "pinch_release", "pull_release", "raise_arm", "turn_settle", "walk_settle", "pocket_use",
+}
 REQUIRED_BASE_BEAT_FIELDS = (
     "framing", "camera_motion", "scene", "lighting", "actor", "core_action",
     "action_target", "left_hand_state", "right_hand_state", "product_point",
@@ -1495,6 +1499,159 @@ def _interval(item: dict[str, Any]) -> tuple[Any, Any]:
     return tuple(interval) if isinstance(interval, list) and len(interval) == 2 else (None, None)
 
 
+def _sequential_live_proof_issues(
+    beat: dict[str, Any], batch_key: Any, controls: Any, claim: Any, proof: Any,
+    *, current_schema: bool, path: str,
+) -> list[dict[str, Any]]:
+    """Validate the opt-in silent-action, settled-endpoint, then live-speech contract.
+
+    This is not a waiver for simultaneous complex action and visible dialogue.
+    The existing beat motion/hand plan continues to describe the action window.
+    """
+    timing = beat.get(SEQUENTIAL_LIVE_PROOF_FIELD)
+    if SEQUENTIAL_LIVE_PROOF_FIELD not in beat:
+        return []
+    path += "." + SEQUENTIAL_LIVE_PROOF_FIELD
+    issues: list[dict[str, Any]] = []
+
+    def reject(message: str, field: str = "") -> None:
+        issues.append(_error("SEQUENTIAL_LIVE_PROOF_INVALID", path + field, message))
+
+    if not isinstance(timing, dict):
+        reject("sequential_live_proof must be an explicit timing object")
+        return issues
+    fields = {
+        "contract_id", "action_window_seconds", "settle_window_seconds", "speech_window_seconds",
+        "speech_motion_budget", "proof_endpoint_visible_during_speech", "speech_endpoint",
+        "speech_hand_anchors", "claim_scope",
+    }
+    allowance = timing.get("claim_scope") == "visible_loose_allowance"
+    if allowance:
+        fields |= {"allowance_displacement_cm", "fabric_extension_forbidden"}
+    if set(timing) != fields:
+        reject("timing object must contain exactly the supported fields")
+    if timing.get("contract_id") != "sequential_live_proof_v1":
+        reject("contract_id must be sequential_live_proof_v1", ".contract_id")
+    batch = batch_key if isinstance(batch_key, dict) else {}
+    generation = controls if isinstance(controls, dict) else {}
+    if not (
+        current_schema and batch.get("market") == "DE" and batch.get("voiceover_language") == "de-DE"
+        and generation.get("delivery_mode") == "de_live_simple"
+        and generation.get("camera_mode") == "fixed_phone"
+        and beat.get("speech_mode") == "on_camera_dialogue" and beat.get("mouth_visibility") == "visible"
+        and beat.get("lip_sync_required") is True and _nonempty(beat.get("spoken_line"))
+        and beat.get("purpose") == "proof" and beat.get("beat_role") == "product_claim"
+        and beat.get("proof_action_type") in SEQUENTIAL_LIVE_PROOF_ACTIONS
+    ):
+        reject("only current-schema fixed-phone DE live product-proof beats may use sequential timing")
+    motion = beat.get("motion_budget") if isinstance(beat.get("motion_budget"), dict) else {}
+    speech_motion = timing.get("speech_motion_budget")
+    if not (
+        isinstance(speech_motion, dict) and set(speech_motion) == {"camera", "performer", "active_hands"}
+        and speech_motion.get("camera") in {"locked", "subtle"}
+        and speech_motion.get("camera") == motion.get("camera")
+        and speech_motion.get("performer") in {"still", "micro"}
+        and speech_motion.get("active_hands") == "zero"
+    ):
+        reject("speech requires the unchanged stable camera, still/micro torso, and zero moving hands", ".speech_motion_budget")
+    windows: list[tuple[Decimal, Decimal]] = []
+    for field in ("action_window_seconds", "settle_window_seconds", "speech_window_seconds"):
+        value = timing.get(field)
+        numbers = [_decimal(v) for v in value] if isinstance(value, list) and len(value) == 2 else []
+        if len(numbers) != 2 or any(v is None or not v.is_finite() or v * 1000 != (v * 1000).to_integral_value() for v in numbers):
+            reject("each absolute-time window needs two finite numeric seconds at millisecond precision", "." + field)
+        else:
+            windows.append((numbers[0], numbers[1]))
+    if len(windows) == 3:
+        action, settle, speech = windows
+        if not (
+            action[0] == _decimal(beat.get("start_seconds"))
+            and action[1] == settle[0] and settle[1] == speech[0]
+            and speech[1] == _decimal(beat.get("end_seconds"))
+            and action[1] - action[0] >= Decimal("0.5")
+            and settle[1] - settle[0] >= Decimal("0.25")
+            and speech[1] - speech[0] >= Decimal("2")
+        ):
+            reject("action, settling, and speech windows must continuously cover the beat without overlap; minima are 0.5, 0.25, and 2 seconds")
+        elif _word_count(beat.get("spoken_line")) > math.floor(float(speech[1] - speech[0]) * 3.5):
+            reject("spoken words exceed 3.5 words per second of the speech window", ".speech_window_seconds")
+    hand_plan = beat.get("hand_plan") if isinstance(beat.get("hand_plan"), dict) else {}
+    expected_anchors = {
+        side: hand_plan.get(side, {}).get("end_anchor")
+        if isinstance(hand_plan.get(side), dict) else None
+        for side in ("left", "right")
+    }
+    if timing.get("speech_hand_anchors") != expected_anchors or not all(_nonempty(v) for v in expected_anchors.values()):
+        reject("speech hands must remain at the exact action-end hand anchors", ".speech_hand_anchors")
+    if not (
+        timing.get("proof_endpoint_visible_during_speech") is True
+        and _nonempty(timing.get("speech_endpoint"))
+        and timing.get("speech_endpoint") == beat.get("proof_endpoint") == beat.get("visible_endpoint")
+    ):
+        reject("the same explicit settled proof endpoint must remain visible throughout speech", ".speech_endpoint")
+    if not (
+        isinstance(claim, dict) and isinstance(proof, dict)
+        and proof.get("beat_id") == beat.get("beat_id")
+        and proof.get("claim_proof_id") == beat.get("claim_proof_id")
+        and proof.get("action_type") == beat.get("proof_action_type")
+        and claim.get("assertion_level") == "visible" and claim.get("assertion_kind") == "visible_feature"
+        and claim.get("claim_mode") == "visual_only"
+        and proof.get("evidence_basis") == claim.get("evidence_basis")
+    ):
+        reject("sequential proof requires its exact bound visible-only claim and proof plan")
+    claim_text = " ".join(str(value or "") for value in (
+        claim.get("feature_id") if isinstance(claim, dict) else None,
+        beat.get("spoken_line"), beat.get("product_point"), beat.get("proof_target"), beat.get("core_action"),
+    ))
+    if _contains_any(claim_text, PERFORMANCE_TERMS) or _performance_group_ids(claim_text):
+        reject("sequential live proof cannot assert material performance or elasticity", ".claim_scope")
+    action_text = " ".join(str(value or "") for value in (
+        beat.get("core_action"), beat.get("left_hand_state"), beat.get("right_hand_state"),
+        hand_plan.get("left"), hand_plan.get("right"),
+    ))
+    concurrent_speech_terms = {
+        "while speaking", "while talking", "while saying", "as she says", "as she speaks",
+        "speaks while", "talks while", "says while", "während sie spricht", "während des sprechens",
+        "beim sprechen", "spricht dabei", "边说边", "一边说", "说话同时", "同时说话", "口播同时",
+    }
+    for description, is_action in (
+        (action_text, True), (beat.get("micro_expression"), False), (beat.get("audio"), False),
+    ):
+        concurrent = _contains_any(description, concurrent_speech_terms) and (
+            is_action or bool(_detected_action_types(description) - {"head_nod"})
+            or _contains_any(description, {"pulling", "pinching", "walking", "turning", "raising", "adjusting", "rubbing", "moving", "inserting", "stepping"})
+        )
+        concurrent |= _contains_any(description, {"speak", "talk", "says", "spricht", "口播", "说话"}) and _contains_any(description, {
+            "while pulling", "while pinching", "while walking", "while turning", "while raising", "while adjusting",
+            "while rubbing", "while moving", "while inserting", "while stepping",
+        })
+        if concurrent:
+            reject("action, expression, and audio text must not request speaking during the silent action or settling window")
+    if _contains_any(" ".join(str(v or "") for v in expected_anchors.values()), {
+        "moves", "moving", "repeatedly", "strokes", "rubs", "taps", "adjusts", "raises", "lowers",
+        "sweeps", "pulling", "pinching", "bewegt", "streicht", "reibt", "zieht", "tippt", "wiederholt",
+        "移动", "反复", "来回", "继续拉", "继续捏", "抚摸", "揉搓", "拍打", "调整",
+    }):
+        reject("all speech hand anchors must describe stationary resting endpoints, not continued hand movement", ".speech_hand_anchors")
+    if beat.get("proof_action_type") in {"pinch_release", "pull_release"}:
+        displacement = _decimal(timing.get("allowance_displacement_cm"))
+        if not (
+            allowance and isinstance(claim, dict) and isinstance(proof, dict) and claim.get("product_part_id") == "fit"
+            and proof.get("product_part_id") == "fit" and beat.get("product_part_id") == "fit"
+            and displacement is not None and displacement.is_finite() and 0 < displacement <= 2
+            and timing.get("fabric_extension_forbidden") is True
+        ):
+            reject("pinch/pull may only move at most 2 cm of existing visible fit allowance, never extend fabric", ".claim_scope")
+        if _contains_any(" ".join(str(v or "") for v in expected_anchors.values()), {
+            "holding", "holds", "held", "gripping", "pinching", "pinches", "pulling", "pulls",
+            "tugs", "taut", "under tension", "hold fabric", "拉住", "捏住", "抓住", "拉紧", "绷紧", "捏着",
+        }):
+            reject("allowance proof must release the garment before the speech hand anchors", ".speech_hand_anchors")
+    elif timing.get("claim_scope") != "visible_structure":
+        reject("other supported actions require visible_structure scope", ".claim_scope")
+    return issues
+
+
 def _check_projection(
     errors: list[dict[str, Any]], base: str, name: str, rendering: Any,
     list_key: str, fields: tuple[str, ...], timeline: dict[str, Any], beats: list[Any],
@@ -1535,6 +1692,9 @@ def _check_projection(
                 if field == "reference_binding":
                     code = "VARIANT_REFERENCE_MISMATCH"
                 errors.append(_error(code, item_path + "." + field, "projection field differs from canonical timeline"))
+        if name == "script" and (SEQUENTIAL_LIVE_PROOF_FIELD in source or SEQUENTIAL_LIVE_PROOF_FIELD in item):
+            if item.get(SEQUENTIAL_LIVE_PROOF_FIELD) != source.get(SEQUENTIAL_LIVE_PROOF_FIELD):
+                errors.append(_error("TIMELINE_ACTION_DRIFT", item_path + "." + SEQUENTIAL_LIVE_PROOF_FIELD, "script must preserve exact sequential action and speech timing"))
 
 
 def _check_broll(
@@ -1580,6 +1740,9 @@ def _check_broll(
             elif shot[field] != source.get(field):
                 code = "VARIANT_REFERENCE_MISMATCH" if field == "reference_binding" else "TIMELINE_ACTION_DRIFT"
                 errors.append(_error(code, shot_path + "." + field, "B-roll field differs from canonical timeline"))
+        if SEQUENTIAL_LIVE_PROOF_FIELD in source or SEQUENTIAL_LIVE_PROOF_FIELD in shot:
+            if shot.get(SEQUENTIAL_LIVE_PROOF_FIELD) != source.get(SEQUENTIAL_LIVE_PROOF_FIELD):
+                errors.append(_error("TIMELINE_ACTION_DRIFT", shot_path + "." + SEQUENTIAL_LIVE_PROOF_FIELD, "B-roll must preserve exact sequential action and speech timing"))
     if parent_positions != sorted(parent_positions):
         errors.append(_error("TIMELINE_ORDER_DRIFT", path + ".shots", "B-roll parent order differs from canonical timeline"))
     for beat_id, source in sources.items():
@@ -2033,6 +2196,20 @@ def validate(document: Any) -> dict[str, Any]:
                     else:
                         planned_beat_ids.add(str(beat_id))
                     claim = claims_registry.get(str(claim_id))
+                    planned_timeline = variant.get("canonical_timeline")
+                    planned_beats = planned_timeline.get("beats", []) if isinstance(planned_timeline, dict) else []
+                    sequential_candidates = [
+                        candidate for candidate in planned_beats if isinstance(candidate, dict)
+                        and candidate.get("beat_id") == beat_id and SEQUENTIAL_LIVE_PROOF_FIELD in candidate
+                    ] if isinstance(planned_beats, list) else []
+                    sequential_allowance_plan = (
+                        len(sequential_candidates) == 1
+                        and not _sequential_live_proof_issues(
+                            sequential_candidates[0], batch_key, generation_controls if market_v14 else {}, claim, proof,
+                            current_schema=market_v14_current, path=proof_path,
+                        )
+                        and sequential_candidates[0][SEQUENTIAL_LIVE_PROOF_FIELD].get("claim_scope") == "visible_loose_allowance"
+                    )
                     if claim is None:
                         errors.append(_error("CLAIM_EVIDENCE_INVALID", proof_path + ".claim_id", "claim_id must resolve in shared_core.claims_registry"))
                     elif str(claim_id) not in claims_allowlist_ids:
@@ -2049,7 +2226,7 @@ def validate(document: Any) -> dict[str, Any]:
                     )
                     if not valid_plan:
                         errors.append(_error("PROOF_PLAN_MISSING", proof_path, "claim-proof action, framing, hand, or endpoint fields are invalid"))
-                    elif not _action_matches_target(proof.get("proof_target"), proof.get("action_type")):
+                    elif not sequential_allowance_plan and not _action_matches_target(proof.get("proof_target"), proof.get("action_type")):
                         errors.append(_error(
                             "CLAIM_PROOF_ACTION_MISMATCH", proof_path + ".action_type",
                             "proof action type does not demonstrate the named garment target",
@@ -2081,14 +2258,14 @@ def validate(document: Any) -> dict[str, Any]:
                                 expected=sorted(claim_evidence_ids or set()), actual=sorted(proof_evidence_ids or set()),
                             ))
                     performance_demo = (
-                        proof.get("action_type") == "pull_release"
+                        (proof.get("action_type") == "pull_release" and not sequential_allowance_plan)
                         or _contains_any(proof.get("proof_target"), PERFORMANCE_TERMS)
                         or (claim is not None and _contains_any(claim.get("feature_id"), PERFORMANCE_TERMS))
                     )
                     required_performance_groups = _performance_group_ids(
                         proof.get("proof_target"), claim.get("feature_id") if isinstance(claim, dict) else None,
                     )
-                    if proof.get("action_type") == "pull_release":
+                    if proof.get("action_type") == "pull_release" and not sequential_allowance_plan:
                         required_performance_groups.add("stretch")
                     claim_performance_groups = _performance_group_ids(claim.get("feature_id")) if isinstance(claim, dict) else set()
                     stretch_claim = (
@@ -2189,6 +2366,15 @@ def validate(document: Any) -> dict[str, Any]:
                 errors.append(_error("DUPLICATE_BEAT_ID", beat_path + ".beat_id", "beat_id must be unique within its timeline", beat_id=beat_id))
             else:
                 beat_ids.add(beat_id)
+            sequential_proof = claim_proof_map.get(str(beat.get("claim_proof_id")))
+            sequential_claim = claims_registry.get(str(sequential_proof.get("claim_id"))) if isinstance(sequential_proof, dict) else None
+            sequential_issues = _sequential_live_proof_issues(
+                beat, batch_key, generation_controls if market_v14 else {}, sequential_claim, sequential_proof,
+                current_schema=market_v14_current, path=beat_path,
+            )
+            errors.extend(sequential_issues)
+            sequential_live_ok = SEQUENTIAL_LIVE_PROOF_FIELD in beat and not sequential_issues
+            sequential_allowance_ok = sequential_live_ok and beat[SEQUENTIAL_LIVE_PROOF_FIELD]["claim_scope"] == "visible_loose_allowance"
             if market_v14:
                 if beat.get("purpose") == "cta":
                     cta_beat_indices.append(beat_index)
@@ -2524,7 +2710,7 @@ def validate(document: Any) -> dict[str, Any]:
                                 beat.get("proof_target"), beat.get("action_target"), beat.get("product_point")
                             ):
                                 errors.append(_error("CLAIM_PROOF_ACTION_MISMATCH", beat_path, "action target/product point must match the claimed garment target"))
-                            if not _action_matches_target(beat.get("proof_target"), beat.get("proof_action_type")):
+                            if not sequential_allowance_ok and not _action_matches_target(beat.get("proof_target"), beat.get("proof_action_type")):
                                 errors.append(_error("CLAIM_PROOF_ACTION_MISMATCH", beat_path + ".proof_action_type", "beat action type does not demonstrate the named garment target"))
                             detected_action_types = _detected_action_types(beat.get("core_action"))
                             declared_action_type = str(beat.get("proof_action_type") or "")
@@ -2582,7 +2768,7 @@ def validate(document: Any) -> dict[str, Any]:
                             requested_performance_groups = _performance_group_ids(
                                 beat.get("spoken_line"), beat.get("product_point"), beat.get("proof_target"), beat.get("core_action"),
                             )
-                            if performance_action or beat.get("proof_action_type") == "pull_release":
+                            if (performance_action or beat.get("proof_action_type") == "pull_release") and not sequential_allowance_ok:
                                 requested_performance_groups.add("stretch")
                             bound_performance_groups = _performance_group_ids(bound_claim.get("feature_id")) if isinstance(bound_claim, dict) else set()
                             performance_evidence_ok = (
@@ -2594,7 +2780,7 @@ def validate(document: Any) -> dict[str, Any]:
                                 )
                                 and requested_performance_groups.issubset(bound_performance_groups)
                             )
-                            if (performance_language or performance_action) and not performance_evidence_ok:
+                            if (performance_language or (performance_action and not sequential_allowance_ok)) and not performance_evidence_ok:
                                 errors.append(_error(
                                     "UNSUPPORTED_PERFORMANCE_DEMO", beat_path,
                                     "spoken or demonstrated performance claims require explicit non-visual evidence and an allowlisted claim",
@@ -2637,7 +2823,7 @@ def validate(document: Any) -> dict[str, Any]:
                                     active_hands != "two" or hand_plan.get("active_hands") != "both"
                                     or motion_budget.get("camera") not in {"locked", "subtle"}
                                     or motion_budget.get("performer") not in {"still", "micro"}
-                                    or beat.get("speech_mode") != "offscreen_voiceover"
+                                    or (beat.get("speech_mode") != "offscreen_voiceover" and not sequential_live_ok)
                                 ):
                                     errors.append(_error("ANATOMY_RISK_OVERLOAD", beat_path, "two-hand proof must be one coordinated evidence-backed action with stable torso/camera and mouth out of frame"))
                             elif hands_required == "body" and motion_budget.get("performer") not in {"simple", "active"}:
@@ -2720,6 +2906,11 @@ def validate(document: Any) -> dict[str, Any]:
                                 "schema 1.3 visible dialogue requires a line-matched expression/delivery cue",
                             ))
                     motion_budget = beat.get("motion_budget") if isinstance(beat.get("motion_budget"), dict) else {}
+                    dialogue_duration = beat_duration
+                    if sequential_live_ok:
+                        timing = beat[SEQUENTIAL_LIVE_PROOF_FIELD]
+                        motion_budget = timing["speech_motion_budget"]
+                        dialogue_duration = _decimal(timing["speech_window_seconds"][1]) - _decimal(timing["speech_window_seconds"][0])
                     per_line_word_budget = 14 if evidence_v13 and lip_sync_priority else 10
                     minimum_visible_dialogue_seconds = (
                         Decimal("1.5")
@@ -2727,14 +2918,14 @@ def validate(document: Any) -> dict[str, Any]:
                         else Decimal("2")
                     )
                     if (
-                        beat_duration < minimum_visible_dialogue_seconds or motion_budget.get("camera") not in {"locked", "subtle"}
+                        dialogue_duration < minimum_visible_dialogue_seconds or motion_budget.get("camera") not in {"locked", "subtle"}
                         or motion_budget.get("performer") == "active" or motion_budget.get("active_hands") == "two"
                         or (enforce_word_budget and words > per_line_word_budget)
                     ):
                         errors.append(_error(
                             "LIPSYNC_COMPLEXITY_OVERLOAD", beat_path,
                             "visible lip-sync exceeds its duration, dialogue, camera, performer, or hand budget",
-                            duration_seconds=float(beat_duration), words=words, word_budget=per_line_word_budget,
+                            duration_seconds=float(dialogue_duration), words=words, word_budget=per_line_word_budget,
                         ))
                 motion_budget = beat.get("motion_budget") if isinstance(beat.get("motion_budget"), dict) else {}
                 detail_proof = beat.get("product_visibility") == "detail"
@@ -2742,8 +2933,11 @@ def validate(document: Any) -> dict[str, Any]:
                 verified_two_hand_detail = (
                     motion_v12 and isinstance(bound_proof, dict)
                     and bound_proof.get("hands_required") == "two"
-                    and bound_proof.get("evidence_basis") in {"user_provided", "product_page", "verified_test"}
-                    and beat.get("speech_mode") == "offscreen_voiceover"
+                    and (
+                        (bound_proof.get("evidence_basis") in {"user_provided", "product_page", "verified_test"}
+                         and beat.get("speech_mode") == "offscreen_voiceover")
+                        or sequential_allowance_ok
+                    )
                 )
                 if detail_proof and (
                     motion_budget.get("camera") not in {"locked", "subtle"}
@@ -2771,7 +2965,7 @@ def validate(document: Any) -> dict[str, Any]:
                         or motion_budget.get("active_hands") == "two"
                         or motion_budget.get("performer") == "active"
                     )
-                    if complex_proof and beat.get("speech_mode") != "offscreen_voiceover":
+                    if complex_proof and beat.get("speech_mode") != "offscreen_voiceover" and not sequential_live_ok:
                         errors.append(_error(
                             "DELIVERY_MODE_CONFLICT", beat_path,
                             "complex garment proof requires off-screen voiceover with the mouth out of frame",
@@ -2783,7 +2977,7 @@ def validate(document: Any) -> dict[str, Any]:
                                 "DELIVERY_MODE_CONFLICT", beat_path + ".speech_mode",
                                 "de_live_simple requires every spoken beat to remain simple visible German dialogue",
                             ))
-                        if needs_proof and proof_action_type not in _market_contract.DE_LIVE_SIMPLE_ACTIONS:
+                        if needs_proof and proof_action_type not in _market_contract.DE_LIVE_SIMPLE_ACTIONS and not sequential_live_ok:
                             errors.append(_error(
                                 "DELIVERY_MODE_CONFLICT", beat_path + ".proof_action_type",
                                 "de_live_simple permits only a simple point, touch, or styling adjustment proof",
@@ -3819,6 +4013,10 @@ def _compile_renderings_v7(
     """Compile current schema 1.4 with the three-layer deadline contract."""
     renderings = _compile_renderings_v6(variant, batch_key, research_bundle)
     beats = variant["canonical_timeline"]["beats"]
+    for script_beat, shot, beat in zip(renderings["script"]["beats"], renderings["broll"]["shots"], beats):
+        if SEQUENTIAL_LIVE_PROOF_FIELD in beat:
+            script_beat[SEQUENTIAL_LIVE_PROOF_FIELD] = copy.deepcopy(beat[SEQUENTIAL_LIVE_PROOF_FIELD])
+            shot[SEQUENTIAL_LIVE_PROOF_FIELD] = copy.deepcopy(beat[SEQUENTIAL_LIVE_PROOF_FIELD])
     references = variant.get("references") if isinstance(variant.get("references"), list) else []
     reference_map: dict[str, list[dict[str, Any]]] = {}
     for reference in references:

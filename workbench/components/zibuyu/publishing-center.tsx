@@ -36,6 +36,7 @@ import {
   PublishingDetail,
   PublishRow,
   publishLabel,
+  scheduleAuditLabel,
 } from '@/lib/publishing';
 
 async function json<T>(response: Response): Promise<T> {
@@ -241,9 +242,13 @@ export function PublishingCenter({
           icon={<ShieldCheck />}
         />
         <Metric
-          label="已排期"
+          label="排期已审核"
           value={
-            actions.filter((action) => action.state === 'scheduled').length
+            actions.filter(
+              (action) =>
+                action.state === 'scheduled' &&
+                action.postScheduleAudit?.status === 'passed',
+            ).length
           }
           icon={<CalendarClock />}
         />
@@ -295,9 +300,13 @@ export function PublishingCenter({
                     {run.modelPreset} · {run.variantCount} 个颜色
                   </span>
                   <span className="mt-3 block text-sm text-primary">
-                    {publishLabel(
-                      batch?.status.state || 'production_not_ready',
-                    )}
+                    {batch?.status.state === 'scheduled'
+                      ? scheduleAuditLabel(
+                          batch.status.postScheduleAudit?.status,
+                        )
+                      : publishLabel(
+                          batch?.status.state || 'production_not_ready',
+                        )}
                   </span>
                 </button>
               );
@@ -371,7 +380,11 @@ export function PublishingCenter({
                     </div>
                   </div>
                   <span className="rounded-full bg-blue-50 px-3 py-1.5 text-sm font-medium text-blue-700">
-                    {publishLabel(current.status.state)}
+                    {current.status.state === 'scheduled'
+                      ? scheduleAuditLabel(
+                          current.status.postScheduleAudit?.status,
+                        )
+                      : publishLabel(current.status.state)}
                   </span>
                 </div>
                 <ol className="mt-6 grid grid-cols-2 gap-3 border-t border-border pt-5 sm:grid-cols-4">
@@ -381,9 +394,7 @@ export function PublishingCenter({
                         reviewed,
                         Boolean(current.manifest),
                         Boolean(current.approval),
-                        ['scheduled', 'published'].includes(
-                          current.status.state,
-                        ),
+                        current.status.postScheduleAudit?.status === 'passed',
                       ][index];
                       return (
                         <li
@@ -682,9 +693,112 @@ export function PublishingCenter({
                               : ''}
                           </p>
                         </div>
-                        <span className="text-sm font-medium text-primary">
-                          {publishLabel(action.state)}
-                        </span>
+                        <div className="text-sm font-medium">
+                          <p className="text-primary">
+                            {publishLabel(action.state)}
+                          </p>
+                          <p
+                            className={
+                              action.postScheduleAudit?.status === 'passed'
+                                ? 'text-emerald-700'
+                                : 'text-amber-800'
+                            }
+                          >
+                            {scheduleAuditLabel(
+                              action.postScheduleAudit?.status,
+                            )}
+                          </p>
+                        </div>
+                        <div className="w-full border-t border-border pt-3 text-sm leading-6">
+                          <p className="break-all">
+                            授权时间：
+                            {action.postScheduleAudit?.expected.scheduledTime ||
+                              action.request.scheduled_time}
+                          </p>
+                          <p className="break-all">
+                            平台回读：
+                            {action.postScheduleAudit?.observed.scheduledTime ||
+                              '尚无计划时间回读'}
+                          </p>
+                          <p className="break-all text-xs text-muted-foreground">
+                            UTC 对照：
+                            {action.postScheduleAudit?.expected
+                              .scheduledInstant || '待确定'}{' '}
+                            →{' '}
+                            {action.postScheduleAudit?.observed
+                              .scheduledInstant || '待确定'}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            回读时间：
+                            {action.postScheduleAudit?.queriedAt || '缺失'}
+                          </p>
+                          {action.postScheduleAudit?.reasons.length ? (
+                            <ul className="mt-2 list-disc space-y-1 pl-5 text-amber-900">
+                              {action.postScheduleAudit.reasons.map(
+                                (reason, index) => (
+                                  <li key={`${index}-${reason}`}>{reason}</li>
+                                ),
+                              )}
+                            </ul>
+                          ) : null}
+                          <details className="mt-2">
+                            <summary className="cursor-pointer text-muted-foreground">
+                              查看账号、商品与完整文案对照
+                            </summary>
+                            <p className="mt-2 break-all">
+                              渠道：
+                              {action.postScheduleAudit?.expected.channelId ||
+                                action.request.channel_id}{' '}
+                              →{' '}
+                              {action.postScheduleAudit?.observed.channelId ||
+                                '缺失'}
+                            </p>
+                            <p className="break-all">
+                              PID：
+                              {action.postScheduleAudit?.expected.productId ||
+                                action.request.product_id}{' '}
+                              →{' '}
+                              {action.postScheduleAudit?.observed.productId ||
+                                '缺失'}
+                            </p>
+                            <p className="break-all">
+                              授权视频：
+                              {action.postScheduleAudit?.expected.videoUrl ||
+                                action.request.video_url}
+                            </p>
+                            <p className="break-all">
+                              平台文件ID：
+                              {action.postScheduleAudit?.expected.fileId ||
+                                '无对应创建回执'}{' '}
+                              →{' '}
+                              {action.postScheduleAudit?.observed.fileId ||
+                                '未返回'}
+                            </p>
+                            <p className="break-all">
+                              平台视频ID：
+                              {action.postScheduleAudit?.expected.videoId ||
+                                '无对应创建回执'}{' '}
+                              →{' '}
+                              {action.postScheduleAudit?.observed.videoId ||
+                                '未返回'}
+                            </p>
+                            <p className="break-all">
+                              回读视频URL：
+                              {action.postScheduleAudit?.observed.videoUrl ||
+                                '未返回'}
+                            </p>
+                            <p className="mt-2 whitespace-pre-wrap break-words">
+                              授权文案：
+                              {action.postScheduleAudit?.expected.caption ||
+                                action.request.video_title}
+                            </p>
+                            <p className="mt-2 whitespace-pre-wrap break-words">
+                              回读文案：
+                              {action.postScheduleAudit?.observed.caption ||
+                                '缺失'}
+                            </p>
+                          </details>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -855,7 +969,9 @@ function ManifestRow({ row }: { row: PublishRow }) {
           {row.captionFinal}
         </p>
         <p className="mt-3 text-xs text-muted-foreground">
-          {row.timezone} · {row.request.scheduled_time}
+          账号当地：{row.localDate} {row.localTime}（{row.timezone}）
+          <br />
+          北京时间排期：{row.request.scheduled_time}
         </p>
       </div>
     </article>

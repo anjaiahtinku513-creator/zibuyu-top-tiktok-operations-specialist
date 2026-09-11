@@ -98,7 +98,9 @@ class PublishHandoffTests(unittest.TestCase):
         self.assertTrue(output["snapshot_only"])
         self.assertTrue(output["revalidate_before_publication"])
         self.assertEqual(output["item_count"], 2)
-        delivery = handoff.validate_delivery(read_json(self.root / "batch-compile.json"), read_json(self.root / "ledger.json"))
+        delivery = handoff.validate_delivery(
+            read_json(self.root / "batch-compile.json"), read_json(self.root / "ledger.json"),
+            batch_compile_sha256=hashlib.sha256((self.root / "batch-compile.json").read_bytes()).hexdigest())
         self.assertEqual([i["copy_ready_caption"] for i in output["items"]],
                          [i["copy_ready_caption"] for i in delivery["items"]])
         for source in output["sources"]:
@@ -108,6 +110,20 @@ class PublishHandoffTests(unittest.TestCase):
             self.assertEqual(path.read_bytes(), content)
         second = handoff.build(str(self.root))
         self.assertEqual(result["handoff_sha256"], second["handoff_sha256"])
+
+    def test_combined_caption_suffix_preserves_paid_sources_and_copy(self):
+        variants = [self.variant("white"), self.variant("black")]
+        for variant in variants:
+            variant["caption"] += " " + " ".join(variant["hashtags"])
+        self.release(self.root, variants)
+        originals = {p: p.read_bytes() for p in self.root.glob("*.json")}
+        result = handoff.build(str(self.root))
+        self.assertTrue(result["valid"])
+        output = read_json(self.root / "publish-handoff.json")
+        self.assertEqual([item["copy_ready_caption"] for item in output["items"]],
+                         [variant["caption"] for variant in variants])
+        for path, content in originals.items():
+            self.assertEqual(path.read_bytes(), content)
 
     def test_streaming_child_resolves_complete_parent(self):
         self.streaming()
@@ -260,11 +276,11 @@ class PublishHandoffTests(unittest.TestCase):
     def test_mid_validation_source_change_blocked(self):
         self.barrier()
         real_validate = handoff.validate_delivery
-        def mutate_then_validate(batch, ledger):
+        def mutate_then_validate(batch, ledger, **kwargs):
             value = read_json(self.root / "ledger.json")
             value["changed_during_build"] = True
             write_json(self.root / "ledger.json", value)
-            return real_validate(batch, ledger)
+            return real_validate(batch, ledger, **kwargs)
         with patch.object(handoff, "validate_delivery", side_effect=mutate_then_validate):
             self.assert_blocked("Source changed while building")
 

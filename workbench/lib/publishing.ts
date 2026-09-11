@@ -18,6 +18,8 @@ export type PublishState =
   | 'reconciling'
   | 'receipt_received'
   | 'scheduled'
+  | 'schedule_needs_review'
+  | 'schedule_mismatch'
   | 'published'
   | 'publish_failed'
   | 'submission_unknown';
@@ -25,6 +27,42 @@ export type PublishStatus = {
   state: PublishState;
   note: string;
   updatedAt: string;
+  postScheduleAudit?: {
+    status: ScheduleAuditStatus;
+    passed: number;
+    mismatch: number;
+    needsReview: number;
+    total: number;
+    coverageReasons?: string[];
+  };
+};
+export type ScheduleAuditStatus = 'passed' | 'needs_review' | 'mismatch';
+export type ScheduleAuditValues = {
+  scheduleId?: string | number | null;
+  logId?: string | number | null;
+  scheduledTime?: string | null;
+  scheduledInstant?: string | null;
+  channelId?: string | null;
+  productId?: string | null;
+  caption?: string | null;
+  status?: string | null;
+  videoUrl?: string | null;
+  fileId?: string | null;
+  videoId?: string | null;
+};
+export type PostScheduleAudit = {
+  status: ScheduleAuditStatus;
+  checkedAt: string;
+  queriedAt: string | null;
+  platformState: string | null;
+  expected: ScheduleAuditValues;
+  observed: ScheduleAuditValues;
+  reasons: string[];
+  checks: {
+    field: string;
+    status: ScheduleAuditStatus | 'not_returned';
+    message: string;
+  }[];
 };
 export type PublishIntent = {
   accountCode: string;
@@ -69,6 +107,8 @@ export type PublishRow = {
 };
 export type PublishAction = PublishRow & {
   state: string;
+  platformState?: string | null;
+  postScheduleAudit?: PostScheduleAudit;
   scheduleId?: string | number | null;
   logId?: string | number | null;
   observedAt?: string;
@@ -79,7 +119,7 @@ export type PublishManifest = {
     field: string;
     evidenceSource: string;
     evidenceExcerpt: string;
-    maxLength: number;
+    maxLength: number | null;
   };
   rows: PublishRow[];
 };
@@ -116,10 +156,19 @@ export const publishLabel = (state: string) =>
     submitting: '提交中',
     reconciling: '核对中',
     receipt_received: '回执待确认',
-    scheduled: '已排期',
+    scheduled: '平台已排期',
+    schedule_needs_review: '排期待审核',
+    schedule_mismatch: '排期不匹配',
     published: '已发布',
     publish_failed: '发布失败',
     submission_unknown: '结果待核对',
     claimed: '已记录提交范围',
     dispatching: '正在提交',
+    not_dispatched: '尚未提交',
   })[state] || state;
+export const scheduleAuditLabel = (status?: ScheduleAuditStatus) =>
+  status === 'passed'
+    ? '排期已审核'
+    : status === 'mismatch'
+      ? '排期不匹配'
+      : '排期待审核';

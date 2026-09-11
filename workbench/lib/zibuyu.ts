@@ -73,6 +73,7 @@ export type RunState =
   | 'submitting'
   | 'awaiting_paid_approval'
   | 'needs_input'
+  | 'needs_review'
   | 'blocked'
   | 'failed'
   | 'delivered'
@@ -92,7 +93,7 @@ export type RunStatus = {
   currentTask: string;
   note: string;
   progress: number;
-  estimatedRemainingSeconds: number;
+  estimatedRemainingSeconds: number | null;
   etaLabel: string;
   variantCount: number;
   startedAt: string;
@@ -100,6 +101,27 @@ export type RunStatus = {
   updatedAt: string;
   completedAt: string | null;
   sessionId: string | null;
+  execution?: {
+    source: string;
+    phase: string;
+    state: string;
+    pid: number | null;
+    startedAt: string;
+    lastEventAt?: string | null;
+    currentTask?: string | null;
+  } | null;
+  preparation?: {
+    mode: string;
+    state: string;
+    batchId?: string;
+    error?: string;
+    shared?: {
+      sessionId: string | null;
+      stageLabel: string;
+      state: string;
+      summary?: string | null;
+    } | null;
+  } | null;
   error: string | null;
 };
 
@@ -253,6 +275,23 @@ export type RunDetail = {
   modelBatchError?: string | null;
 };
 
+export function isPaidApprovalReady(detail: RunDetail) {
+  const { intake, status, prepareResult, approval, modelBatchError } = detail;
+  return Boolean(
+    !approval &&
+    !modelBatchError &&
+    status.state === 'awaiting_paid_approval' &&
+    status.execution?.state !== 'running' &&
+    status.execution?.state !== 'failed' &&
+    prepareResult?.runId === intake.runId &&
+    prepareResult.phase === 'prepare' &&
+    prepareResult.outcome === 'awaiting_paid_approval' &&
+    prepareResult.artifacts.some(
+      (artifact) => artifact.path && !/^https?:\/\//i.test(artifact.path),
+    ),
+  );
+}
+
 export type ModelBatch = {
   batchId: string;
   modelCount: number;
@@ -308,6 +347,13 @@ export type UsageSummary = {
 };
 
 export type Health = {
+  preparationConcurrency?: number;
+  activePreparationJobs?: number;
+  waitingPreparationJobs?: number;
+  activeSharedJobs?: number;
+  activePaidJobs?: number;
+  waitingPaidJobs?: number;
+  workflowVersion?: string;
   ok: boolean;
   codexAvailable: boolean;
   mode: 'real' | 'mock';
@@ -326,6 +372,7 @@ export function runStateLabel(state: RunState) {
     submitting: '提交中',
     awaiting_paid_approval: '待付费确认',
     needs_input: '待补资料',
+    needs_review: '待验收',
     blocked: '已暂停',
     failed: '执行失败',
     delivered: '已交付',
@@ -335,6 +382,7 @@ export function runStateLabel(state: RunState) {
 
 export function isTerminalState(state: RunState) {
   return [
+    'needs_review',
     'needs_input',
     'blocked',
     'failed',

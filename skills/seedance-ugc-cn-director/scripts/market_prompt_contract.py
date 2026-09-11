@@ -1200,6 +1200,35 @@ def _spoken_instruction(beat: dict[str, Any], profile: dict[str, Any]) -> str:
     line = json.dumps(beat.get("spoken_line"), ensure_ascii=False)
     language = profile.get("spoken_language_name", "the selected market language")
     if beat.get("speech_mode") == "on_camera_dialogue":
+        timing = beat.get("sequential_live_proof")
+        if isinstance(timing, dict):
+            def window_text(field: str) -> str:
+                value = timing.get(field)
+                if not isinstance(value, list) or len(value) != 2:
+                    return "invalid timing"
+                try:
+                    if any(not Decimal(str(number)).is_finite() for number in value):
+                        return "invalid timing"
+                except (InvalidOperation, TypeError, ValueError):
+                    return "invalid timing"
+                return f"{_time_text(value[0])}-{_time_text(value[1])}s"
+
+            anchors = timing.get("speech_hand_anchors") if isinstance(timing.get("speech_hand_anchors"), dict) else {}
+            instruction = (
+                f"Timed action before live speech: {window_text('action_window_seconds')} perform only the declared single proof action in silence, with no speaking lip motion. "
+                f"{window_text('settle_window_seconds')} stop the action and let the garment settle in silence. "
+                f"Only during {window_text('speech_window_seconds')} the same creator says {line} in {language}; "
+                "the mouth is visible and matches every word exactly, the stable camera is unchanged, the torso is still apart from natural micro-expression, and neither hand moves. "
+                f"Keep the left hand {_inline(anchors.get('left'))} and the right hand {_inline(anchors.get('right'))}. "
+                f"Throughout speech keep this settled proof endpoint readable and unobstructed: {_inline(timing.get('speech_endpoint'))}. "
+                "Do not repeat the action while speaking and do not add off-screen narration."
+            )
+            if timing.get("claim_scope") == "visible_loose_allowance":
+                instruction += (
+                    f" Move only existing loose garment allowance by at most {_inline(timing.get('allowance_displacement_cm'))} cm, then fully release it before settling. "
+                    "Preserve yarn length and stripe spacing; this demonstrates visible fit space only, never fabric stretch, elasticity, or performance."
+                )
+            return instruction
         return f"The creator says {line} in {language}; the mouth is visible and matches every word exactly."
     if beat.get("speech_mode") == "offscreen_voiceover":
         return f"Off-screen {language} voiceover says {line}; keep the mouth out of frame and do not animate lip-sync."
@@ -1493,10 +1522,17 @@ def serialize_prompt_v7(
             "and keep one coherent creator, outfit, declared scene plan, physical light direction, and live sound world."
         )
     elif shell == "de_performance_script":
-        lines.append(
-            "German performance shell: keep every spoken word German and naturally synchronized when the mouth is visible; use a stable simple action for live speech "
-            "and move detail, walking, turning, or two-hand proof to off-screen voiceover."
-        )
+        if any(isinstance(beat, dict) and "sequential_live_proof" in beat for beat in beats):
+            lines.append(
+                "German performance shell: keep every spoken word German and naturally synchronized with the visible creator. "
+                "For explicitly timed sequential proofs, complete the declared silent action and silent settling window first, then speak with still hands and a readable settled endpoint; never combine complex action with live speech. "
+                "Other live proof remains a stable simple gesture."
+            )
+        else:
+            lines.append(
+                "German performance shell: keep every spoken word German and naturally synchronized when the mouth is visible; use a stable simple action for live speech "
+                "and move detail, walking, turning, or two-hand proof to off-screen voiceover."
+            )
     else:
         lines.append(
             "US technical shell: authentic phone-shot UGC with immediate garment visibility, readable physical proof, and restrained natural performance."

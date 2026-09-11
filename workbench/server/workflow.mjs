@@ -98,6 +98,7 @@ export function estimateRemainingSeconds(stageKey, variantCount) {
 
 export function etaLabel(seconds, waitingForApproval = false) {
   if (seconds == null) return waitingForApproval ? '等待你确认' : '--';
+  if (seconds === 0 && !waitingForApproval) return '已完成';
   const minutes = Math.max(1, Math.ceil(seconds / 60));
   if (minutes < 60) {
     return `约 ${minutes} 分钟${waitingForApproval ? ' + 待确认' : ''}`;

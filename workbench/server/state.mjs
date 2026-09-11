@@ -6,6 +6,7 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 
 import {
   WORKFLOW_STAGES,
@@ -26,9 +27,18 @@ export async function readJson(filePath, fallback = null) {
 
 export async function writeJsonAtomic(filePath, value) {
   await mkdir(path.dirname(filePath), { recursive: true });
-  const temporary = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  const temporary = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
   await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
-  await rename(temporary, filePath);
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await rename(temporary, filePath);
+      break;
+    } catch (error) {
+      if (attempt >= 5 || !['EPERM', 'EACCES', 'EBUSY'].includes(error.code))
+        throw error;
+      await new Promise((resolve) => setTimeout(resolve, 20 * (attempt + 1)));
+    }
+  }
 }
 
 export async function appendEvent(runDir, event) {
@@ -38,7 +48,44 @@ export async function appendEvent(runDir, event) {
 }
 
 export async function readStatus(runDir) {
-  return readJson(path.join(runDir, 'web', 'status.json'));
+  const [status, session, runtime, preparation] = await Promise.all([
+    readJson(path.join(runDir, 'web', 'status.json')),
+    readJson(path.join(runDir, 'web', 'session.json')),
+    readJson(path.join(runDir, 'web', 'runtime.json')),
+    readJson(path.join(runDir, 'web', 'preparation.json')),
+  ]);
+  if (!status) return null;
+  let shared = null;
+  if (
+    preparation?.sharedDir &&
+    path
+      .resolve(preparation.sharedDir)
+      .startsWith(path.join(path.dirname(runDir), '_shared') + path.sep)
+  ) {
+    const [sharedStatus, sharedSession, manifest] = await Promise.all([
+      readJson(path.join(preparation.sharedDir, 'web', 'status.json')),
+      readJson(path.join(preparation.sharedDir, 'web', 'session.json')),
+      readJson(path.join(preparation.sharedDir, 'manifest.json')),
+    ]);
+    shared = {
+      sessionId: sharedSession?.sessionId ?? null,
+      stageLabel:
+        manifest?.state === 'ready'
+          ? '公共准备已完成'
+          : (sharedStatus?.stageLabel ?? '等待公共准备'),
+      state:
+        manifest?.state === 'ready'
+          ? 'ready'
+          : (sharedStatus?.state ?? 'queued'),
+      summary: manifest?.summary ?? sharedStatus?.currentTask ?? null,
+    };
+  }
+  return {
+    ...status,
+    sessionId: session?.sessionId ?? status.sessionId ?? null,
+    execution: runtime ?? null,
+    preparation: preparation ? { ...preparation, shared } : null,
+  };
 }
 
 export async function transitionStatus(
@@ -59,10 +106,19 @@ export async function transitionStatus(
   const stage = getStage(stageKey ?? current.stageKey ?? 'intake_validation');
   const variantCount = intake?.variants?.length ?? current.variantCount ?? 1;
   const waitingForApproval = state === 'awaiting_paid_approval';
+  const paused = [
+    'needs_review',
+    'needs_input',
+    'blocked',
+    'failed',
+    'submission_unknown',
+  ].includes(state);
   const remainingSeconds =
     state === 'delivered'
       ? 0
-      : estimateRemainingSeconds(stage.key, variantCount);
+      : paused
+        ? null
+        : estimateRemainingSeconds(stage.key, variantCount);
   const status = {
     ...current,
     runId: intake.runId ?? current.runId,
@@ -79,13 +135,17 @@ export async function transitionStatus(
     note,
     progress: forceProgress ?? getProgress(stage.key, state),
     estimatedRemainingSeconds: remainingSeconds,
-    etaLabel: etaLabel(remainingSeconds, waitingForApproval),
+    etaLabel: paused
+      ? state === 'needs_review'
+        ? '待验收'
+        : '待处理'
+      : etaLabel(remainingSeconds, waitingForApproval),
     variantCount,
     startedAt: current.startedAt ?? now,
     stageStartedAt:
       current.stageKey === stage.key ? (current.stageStartedAt ?? now) : now,
     updatedAt: now,
-    completedAt: state === 'delivered' ? now : (current.completedAt ?? null),
+    completedAt: state === 'delivered' ? (current.completedAt ?? now) : null,
     sessionId: sessionId ?? current.sessionId ?? null,
     error: error ?? null,
   };

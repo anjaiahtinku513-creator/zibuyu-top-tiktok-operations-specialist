@@ -35,6 +35,7 @@ import { UsageSummaryCard } from './usage-summary';
 import {
   Artifact,
   formatTime,
+  isPaidApprovalReady,
   RunDetail,
   RunState,
   runStateLabel,
@@ -54,7 +55,7 @@ export function TaskDetailView({
   loading: boolean;
   onBack: () => void;
   onRefresh: () => void;
-  onApprove: (variantIds: string[]) => Promise<void>;
+  onApprove: (runId: string, variantIds: string[]) => Promise<void>;
   onPublish: () => void;
   onOpenRun: (runId: string) => void;
 }) {
@@ -75,24 +76,29 @@ export function TaskDetailView({
 
   const { intake, status, prepareResult, paidResult, approval, events } =
     detail;
+  const approvalReady = isPaidApprovalReady(detail);
+  const phaseResult = approval ? paidResult : prepareResult;
   const artifacts = [
-    ...(prepareResult?.artifacts ?? []),
     ...(paidResult?.artifacts ?? []),
+    ...(prepareResult?.artifacts ?? []),
   ];
   const modelName =
     intake.model.mode === 'preset' ? intake.model.preset : intake.model.name;
-  const missingInputs = paidResult?.missingInputs?.length
-    ? paidResult.missingInputs
-    : (prepareResult?.missingInputs ?? []);
+  const missingInputs = phaseResult?.missingInputs ?? [];
 
   async function approve() {
+    if (!approvalReady || approving) return;
     setApprovalError('');
     setApproving(true);
     try {
-      await onApprove(intake.variants.map((variant) => variant.id));
+      await onApprove(
+        intake.runId,
+        intake.variants.map((variant) => variant.id),
+      );
       setApprovalOpen(false);
     } catch (error) {
       setApprovalError(error instanceof Error ? error.message : '授权提交失败');
+      onRefresh();
     } finally {
       setApproving(false);
     }
@@ -196,8 +202,37 @@ export function TaskDetailView({
             ))}
           </div>
           <p className="mt-3 text-sm text-muted-foreground">
-            每位模特分别审核、确认生成与质检；全批交付后再安排发布。
+            商品资料与每色三视图共享一次 → 最多 3 位模特并行准备 →
+            分别确认生成与质检。 付费生成由统一队列控制，全批交付后再安排发布。
           </p>
+        </section>
+      ) : null}
+
+      {status.preparation?.mode === 'shared' ? (
+        <section
+          className="surface-card mb-5 border-blue-100 bg-blue-50/40 p-5"
+          aria-label="共享准备状态"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="font-semibold">
+              {status.preparation.state === 'waiting_shared'
+                ? '正在等待公共素材'
+                : '公共素材已接入本模特'}
+            </h2>
+            <Badge variant="outline">
+              {status.preparation.shared?.stageLabel ?? '公共准备'}
+            </Badge>
+          </div>
+          <p className="mt-2 text-sm text-muted-foreground">
+            {status.preparation.error ||
+              status.preparation.shared?.summary ||
+              '商品分析和每个颜色的三视图只处理一次；各模特保留独立的脚本、口播、身份绑定和验收。'}
+          </p>
+          {status.preparation.shared?.sessionId ? (
+            <p className="mt-2 break-all text-sm">
+              公共准备会话：{status.preparation.shared.sessionId}
+            </p>
+          ) : null}
         </section>
       ) : null}
 
@@ -226,19 +261,26 @@ export function TaskDetailView({
       {status.state === 'awaiting_paid_approval' ? (
         <div className="mb-5 flex flex-col justify-between gap-4 border border-[#d8c6a5] bg-[#fffaf0] px-4 py-4 sm:flex-row sm:items-center">
           <div>
-            <p className="font-semibold text-[#6d5120]">准备阶段已完成</p>
+            <p className="font-semibold text-[#6d5120]">
+              {approvalReady ? '准备阶段已完成' : '正在整理准备产物与授权清单'}
+            </p>
             <p className="mt-1 text-sm leading-5 text-[#826a3e]">
-              确认后将为 {modelName} 的 {intake.variants.length} 个颜色执行
-              PopBoom 生成与交付质检。
+              {approvalReady
+                ? `确认后将为 ${modelName} 的 ${intake.variants.length} 个颜色执行 PopBoom 生成与交付质检。`
+                : (detail.modelBatchError ??
+                  '产物清单就绪后，确认按钮会自动开放。')}
             </p>
           </div>
           <Button
             className="shrink-0 bg-[#0071e3] hover:bg-[#005bb8]"
-            onClick={() => setApprovalOpen(true)}
-            disabled={Boolean(detail.modelBatchError)}
+            onClick={() => {
+              setApprovalError('');
+              setApprovalOpen(true);
+            }}
+            disabled={!approvalReady}
           >
             <CheckCircle2 />
-            审核并确认生成
+            {approvalReady ? '审核并确认生成' : '正在整理产物'}
           </Button>
         </div>
       ) : null}
@@ -331,16 +373,16 @@ export function TaskDetailView({
             </ol>
           </section>
 
-          {paidResult || prepareResult ? (
+          {phaseResult || status.note ? (
             <section className="rounded-2xl border border-border bg-white px-4 py-5 sm:px-5">
               <h2 className="text-base font-semibold">阶段结果</h2>
               <p className="mt-3 text-sm leading-6 text-muted-foreground">
-                {(paidResult || prepareResult)?.summary}
+                {phaseResult?.summary || status.note}
               </p>
-              {(paidResult || prepareResult)?.nextAction ? (
+              {phaseResult?.nextAction ? (
                 <div className="mt-4 border-l-2 border-[#0071e3] pl-3 text-sm">
                   <span className="text-muted-foreground">下一步：</span>
-                  {(paidResult || prepareResult)?.nextAction}
+                  {phaseResult.nextAction}
                 </div>
               ) : null}
               {missingInputs.length ? (
@@ -400,7 +442,16 @@ export function TaskDetailView({
                 />
               ) : null}
               {intake.execution ? (
-                <InfoRow label="会话" value="每批独立" />
+                <InfoRow
+                  label="会话"
+                  value={
+                    status.sessionId
+                      ? '本模特独立会话'
+                      : status.preparation?.state === 'waiting_shared'
+                        ? '等待公共准备'
+                        : '尚未启动'
+                  }
+                />
               ) : null}
               <InfoRow
                 label="颜色"
@@ -408,6 +459,38 @@ export function TaskDetailView({
               />
               <InfoRow label="创建" value={formatTime(intake.createdAt)} />
             </dl>
+            {status.sessionId ? (
+              <div className="mt-4 rounded-lg bg-muted/60 p-3 text-sm">
+                <p className="font-medium">Codex 后台会话</p>
+                <code className="mt-2 block select-all break-all">
+                  {status.sessionId}
+                </code>
+                <p className="mt-2 text-muted-foreground">
+                  本机 CLI 执行记录，可在这里跟踪；不会自动创建桌面侧栏任务。
+                </p>
+                {status.execution?.lastEventAt ? (
+                  <p className="mt-2 text-muted-foreground">
+                    最近活动：{formatTime(status.execution.lastEventAt)}
+                  </p>
+                ) : null}
+                {status.execution?.currentTask ? (
+                  <p className="mt-2 leading-6">
+                    {status.execution.state !== 'running'
+                      ? '上次执行末条记录：'
+                      : ''}
+                    {status.execution.currentTask}
+                  </p>
+                ) : null}
+                <a
+                  className="mt-3 inline-flex items-center gap-1 text-[#0071e3] underline underline-offset-4"
+                  target="_blank"
+                  rel="noreferrer"
+                  href={`/api/runs/${encodeURIComponent(intake.runId)}/artifact?path=${encodeURIComponent(`web/codex-events-${status.execution?.phase || 'prepare'}.jsonl`)}`}
+                >
+                  查看执行日志 <ExternalLink className="size-4" />
+                </a>
+              </div>
+            ) : null}
           </section>
 
           <section className="rounded-2xl border border-border bg-white px-4 py-5">
@@ -449,7 +532,12 @@ export function TaskDetailView({
         </aside>
       </div>
 
-      <AlertDialog open={approvalOpen} onOpenChange={setApprovalOpen}>
+      <AlertDialog
+        open={
+          approvalOpen && !approval && status.state === 'awaiting_paid_approval'
+        }
+        onOpenChange={setApprovalOpen}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogMedia className="bg-amber-50 text-amber-700">
@@ -471,7 +559,7 @@ export function TaskDetailView({
             <AlertDialogAction
               className="bg-[#0071e3] hover:bg-[#005bb8]"
               onClick={approve}
-              disabled={approving}
+              disabled={approving || !approvalReady}
             >
               {approving ? <Spinner /> : null}
               {approving ? '正在记录授权' : '确认并开始'}
@@ -491,6 +579,7 @@ export function StatusBadge({ state }: { state: RunState }) {
     awaiting_paid_approval: 'border-[#d8c6a5] bg-[#fffaf0] text-[#6d5120]',
     needs_input: 'border-amber-200 bg-amber-50 text-amber-800',
     blocked: 'border-neutral-300 bg-neutral-100 text-neutral-700',
+    needs_review: 'border-amber-300 bg-amber-50 text-amber-800',
     failed: 'border-red-200 bg-red-50 text-red-700',
     delivered: 'border-emerald-200 bg-emerald-50 text-emerald-800',
     submission_unknown: 'border-red-300 bg-red-50 text-red-800',

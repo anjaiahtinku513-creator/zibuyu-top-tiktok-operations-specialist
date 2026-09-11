@@ -11,6 +11,12 @@ import {
 } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { validatePreparationCompiles } from './compile-validation.mjs';
+import { verifyAuditedPaidRecovery } from './paid-recovery.mjs';
+import {
+  readCurrentPhaseResult,
+  reconcilePaidRun,
+} from './production-reconciliation.mjs';
 import { fileURLToPath } from 'node:url';
 import { readUsage } from './usage.mjs';
 import {
@@ -40,6 +46,10 @@ import {
   discoverCodexCli,
   enqueueColorClassification,
   enqueueCodexPhase,
+  enqueuePreparationBatch,
+  isProcessAlive,
+  hasPaidDispatchEvidence,
+  verifyPaidAuthorization,
   getExecutorInfo,
 } from './codex-runner.mjs';
 import {
@@ -197,7 +207,7 @@ async function getRunDetail(runId) {
     await Promise.all([
       readStatus(runDir),
       readJson(path.join(runDir, 'web', 'result-prepare.json')),
-      readJson(path.join(runDir, 'web', 'result-paid.json')),
+      readCurrentPhaseResult(runDir, 'paid'),
       readJson(path.join(runDir, 'approval.json')),
       readEvents(runDir),
       readUsage(runDir),
@@ -564,10 +574,127 @@ async function writeApprovalExclusive(filePath, value) {
 
 async function recoverInterruptedRuns() {
   const statuses = await listRuns();
+  const groups = new Map();
   for (const status of statuses) {
-    if (!['queued', 'running', 'submitting'].includes(status.state)) continue;
     const runDir = getRunDir(status.runId);
-    const uncertain = status.state === 'submitting';
+    const continuation = await readJson(
+      path.join(runDir, 'web', 'resume-prepare.json'),
+    );
+    if (
+      !isProcessAlive(status.execution?.pid) &&
+      [
+        'submission_unknown',
+        'blocked',
+        'failed',
+        'running',
+        'submitting',
+      ].includes(status.state) &&
+      (await reconcilePaidRun(runDir))
+    )
+      continue;
+    if (
+      !['queued', 'running', 'submitting'].includes(status.state) &&
+      !(status.state === 'blocked' && continuation && !continuation.consumedAt)
+    )
+      continue;
+    const approval = await readJson(path.join(runDir, 'approval.json'));
+    if (
+      status.execution?.state === 'running' &&
+      isProcessAlive(status.execution.pid)
+    ) {
+      app.log.warn(
+        { runId: status.runId },
+        'Existing execution is still alive; preserving it',
+      );
+      continue;
+    }
+    const paidRecovery = await readJson(
+      path.join(runDir, 'web/paid-recovery.json'),
+    );
+    if (
+      approval &&
+      status.state === 'queued' &&
+      paidRecovery &&
+      !paidRecovery.consumedAt
+    ) {
+      try {
+        await verifyPaidAuthorization(runDir, approval);
+        await verifyAuditedPaidRecovery(runDir, paidRecovery.id, approval);
+        void enqueueCodexPhase(runDir, 'paid', {
+          recoveryId: paidRecovery.id,
+        }).catch((error) =>
+          app.log.error(
+            { runId: status.runId, error: error.message },
+            'Audited repair continuation requires review',
+          ),
+        );
+      } catch (error) {
+        await transitionStatus(runDir, {
+          state: 'blocked',
+          currentTask: '修复续跑资料需要核对',
+          note: error.message,
+          error: error.message,
+        });
+      }
+      continue;
+    }
+    if (
+      approval &&
+      status.state === 'queued' &&
+      !(await hasPaidDispatchEvidence(runDir))
+    ) {
+      try {
+        await verifyPaidAuthorization(runDir, approval);
+        void enqueueCodexPhase(runDir, 'paid').catch((error) =>
+          app.log.error(
+            { error: error.message, runId: status.runId },
+            'Recovered authorized queued generation requires review',
+          ),
+        );
+      } catch (error) {
+        await transitionStatus(runDir, {
+          state: 'blocked',
+          currentTask: '已授权资料需要核对',
+          note: error.message,
+          error: error.message,
+        });
+      }
+      continue;
+    }
+    const uncertain = Boolean(
+      approval ||
+      status.execution?.phase === 'paid' ||
+      status.state === 'submitting',
+    );
+    if (
+      !uncertain &&
+      status.execution?.state === 'running' &&
+      isProcessAlive(status.execution.pid)
+    ) {
+      app.log.warn(
+        { runId: status.runId },
+        'Existing preparation process is still alive; not starting a duplicate',
+      );
+      continue;
+    }
+    const safeQueued =
+      status.state === 'queued' && !status.sessionId && !status.execution;
+    const explicitResume =
+      continuation?.runId === status.runId &&
+      continuation?.sessionId === status.sessionId &&
+      !continuation.consumedAt;
+    if (!uncertain && (safeQueued || explicitResume)) {
+      if (explicitResume)
+        await writeJsonAtomic(path.join(runDir, 'web', 'resume-prepare.json'), {
+          ...continuation,
+          consumedAt: new Date().toISOString(),
+        });
+      const key = status.modelBatchId || status.runId;
+      if (!groups.has(key)) groups.set(key, { runs: [], resumeRunIds: [] });
+      groups.get(key).runs.push({ runId: status.runId, runDir });
+      if (explicitResume) groups.get(key).resumeRunIds.push(status.runId);
+      continue;
+    }
     await transitionStatus(runDir, {
       stageKey: status.stageKey,
       state: uncertain ? 'submission_unknown' : 'blocked',
@@ -579,6 +706,15 @@ async function recoverInterruptedRuns() {
         : '已保留现有产物和 Codex 会话记录',
     });
   }
+  for (const group of groups.values())
+    void enqueuePreparationBatch(group.runs, {
+      resumeRunIds: group.resumeRunIds,
+    }).catch((error) => {
+      app.log.error(
+        { error: error.message },
+        'Recovered preparation requires review',
+      );
+    });
 }
 
 async function recoverInterruptedClassifications() {
@@ -742,11 +878,12 @@ app.post('/api/runs', async (request, reply) => {
     throw httpError(415, '请使用 multipart/form-data 上传制作单');
   const created = await saveMultipartRun(request);
   if (!created.idempotent)
-    for (const run of created.runs) {
-      void enqueueCodexPhase(run.runDir, 'prepare').catch((error) => {
-        app.log.error({ error, runId: run.runId }, 'Codex preparation failed');
-      });
-    }
+    void enqueuePreparationBatch(created.runs).catch((error) => {
+      app.log.error(
+        { error: error.message, runId: created.runId },
+        'Codex preparation failed',
+      );
+    });
   return reply.code(202).send({
     runId: created.runId,
     status: created.status,
@@ -785,6 +922,14 @@ app.post('/api/runs/:runId/approve', async (request, reply) => {
     throw httpError(400, '付费授权的颜色范围无效');
   }
 
+  const compileValidation =
+    getExecutorInfo().mode === 'real'
+      ? await validatePreparationCompiles(runDir, detail.prepareResult, {
+          intake: detail.intake,
+          variantIds: requestedIds,
+        })
+      : null;
+
   const approval = {
     version: 1,
     runId: detail.intake.runId,
@@ -802,6 +947,16 @@ app.post('/api/runs/:runId/approve', async (request, reply) => {
       '用户已在 Zibuyu 本地制作台确认对列明颜色执行 PopBoom 生成与交付质检。',
     artifactManifest: await buildArtifactManifest(runDir, detail.prepareResult),
   };
+  if (compileValidation) {
+    approval.compileValidation = compileValidation;
+    approval.artifactManifest.push({
+      kind: 'json',
+      label: '服务器正式编译校验',
+      path: path.relative(runDir, compileValidation.receiptPath),
+      size: (await stat(compileValidation.receiptPath)).size,
+      sha256: compileValidation.receiptSha256,
+    });
+  }
   approval.authorizationFingerprint = authorizationFingerprint({
     intake: detail.intake,
     prepareResult: detail.prepareResult,
@@ -835,6 +990,47 @@ app.post('/api/runs/:runId/approve', async (request, reply) => {
   return reply.code(202).send({ approval, status });
 });
 
+app.post(
+  '/api/runs/:runId/resume-authorized-repair',
+  async (request, reply) => {
+    requireMutationToken(request);
+    const runDir = getRunDir(request.params.runId);
+    const detail = await getRunDetail(request.params.runId);
+    const recovery = await readJson(
+      path.join(runDir, 'web/paid-recovery.json'),
+    );
+    if (
+      request.body?.confirm !== true ||
+      !recovery ||
+      request.body?.recoveryId !== recovery.id
+    )
+      throw httpError(409, '缺少已核对的修复续跑请求');
+    if (recovery.consumedAt)
+      return reply.send({ status: detail.status, idempotent: true });
+    if (
+      detail.status.execution?.state === 'running' &&
+      isProcessAlive(detail.status.execution.pid)
+    )
+      throw httpError(409, '本单仍有执行进程，暂不能派发修复续跑');
+    await verifyPaidAuthorization(runDir, detail.approval);
+    await verifyAuditedPaidRecovery(runDir, recovery.id, detail.approval);
+    const status = await transitionStatus(runDir, {
+      state: 'queued',
+      stageKey: 'popboom_generation',
+      currentTask: '德2修复已核对，等待继续已授权制作',
+      note: '新产物指纹已绑定本次继续制作指令，沿用原模特会话。',
+    });
+    void enqueueCodexPhase(runDir, 'paid', { recoveryId: recovery.id }).catch(
+      (error) =>
+        app.log.error(
+          { runId: detail.intake.runId, error: error.message },
+          'Audited repair continuation requires review',
+        ),
+    );
+    return reply.code(202).send({ status, recoveryId: recovery.id });
+  },
+);
+
 app.get('/api/runs/:runId/events', async (request, reply) => {
   requireSessionCookie(request);
   const runDir = getRunDir(request.params.runId);
@@ -849,14 +1045,15 @@ app.get('/api/runs/:runId/events', async (request, reply) => {
   });
 
   let closed = false;
-  let lastUpdatedAt = '';
+  let lastSignature = '';
   let lastHeartbeat = Date.now();
   const push = async () => {
     if (closed) return;
     const status = await readStatus(runDir);
     if (!status) return;
-    if (status.updatedAt !== lastUpdatedAt) {
-      lastUpdatedAt = status.updatedAt;
+    const signature = JSON.stringify(status);
+    if (signature !== lastSignature) {
+      lastSignature = signature;
       reply.raw.write(`event: status\ndata: ${JSON.stringify(status)}\n\n`);
     } else if (Date.now() - lastHeartbeat > 15000) {
       lastHeartbeat = Date.now();
@@ -866,7 +1063,7 @@ app.get('/api/runs/:runId/events', async (request, reply) => {
 
   await push();
   const timer = setInterval(() => void push().catch(() => {}), 1000);
-  request.raw.on('close', () => {
+  reply.raw.on('close', () => {
     closed = true;
     clearInterval(timer);
   });
@@ -895,12 +1092,17 @@ app.get('/api/runs/:runId/artifact', async (request, reply) => {
     '.json': 'application/json; charset=utf-8',
     '.txt': 'text/plain; charset=utf-8',
     '.md': 'text/markdown; charset=utf-8',
+    '.jsonl': 'text/plain; charset=utf-8',
+    '.log': 'text/plain; charset=utf-8',
   };
   reply.type(
     mimeByExtension[path.extname(absolute).toLowerCase()] ||
       'application/octet-stream',
   );
-  reply.header('Cache-Control', 'private, max-age=60');
+  reply.header(
+    'Cache-Control',
+    /\.(jsonl|log)$/i.test(absolute) ? 'no-store' : 'private, max-age=60',
+  );
   return reply.send(createReadStream(absolute));
 });
 
@@ -916,11 +1118,12 @@ app.setErrorHandler((error, request, reply) => {
 });
 
 await mkdir(classificationsRoot, { recursive: true });
+// Own the bridge port before recovery can dispatch any persisted work.
+await app.listen({ host, port });
 await recoverIncompleteModelSubmissions(runsRoot);
 await recoverInterruptedRuns();
 await recoverPublishing(runsRoot);
 await recoverInterruptedClassifications();
-await app.listen({ host, port });
 
 const shutdown = async () => {
   await app.close();

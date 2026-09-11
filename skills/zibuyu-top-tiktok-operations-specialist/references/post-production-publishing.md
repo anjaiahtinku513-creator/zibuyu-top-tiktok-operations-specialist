@@ -1,6 +1,10 @@
 # Post-Production Publishing
 
-Use this reference only after the original production, rendered-quality, and Copy Delivery Pack gates. The user-selected order is **produce the whole batch -> inspect the actual videos -> deliver videos and copy -> prepare publishing -> confirm the final table -> schedule and verify**. Production streaming remains internal to production and never permits early publishing.
+Use this reference only after the original production, rendered-quality, and Copy Delivery Pack gates. The user-selected order is **produce the whole batch -> inspect the actual videos -> deliver videos and copy -> prepare publishing -> bind explicit publishing authorization -> schedule and verify**. Production streaming remains internal to production and never permits early publishing.
+
+## Standing publishing defaults
+
+Apply the bundled publishing [confirmed contract](../../zibuyu-popboom-auto-publish/references/confirmed-publishing-contract.md): full caption plus five tags goes in video_title; convert account-local times through actual DST to Beijing +08:00; bare PopBoom readback times use that confirmed convention. User manual acceptance counts as final QA with its basis recorded. Reuse explicit same-scope publishing authorization; do not repeat questions about these rules.
 
 ## Enter the publishing phase
 
@@ -27,7 +31,7 @@ The immutable production files remain production truth. Store mutable publishing
 
 - `manifest.json`: source handoff digest, exact selected video identities and QA references, full `caption_final`, resolved account/product, timezone and ISO schedule, cover and all outbound settings; include the live-schema caption mapping evidence.
 - `approval.json`: the exact final manifest version/hash and the user's explicit authorization scope. A production approval or a readiness snapshot does not authorize publishing.
-- `ledger.json`: one publishing action identity per final video/channel/product/time, submission state, returned `schedule_id`/`log_id`, and observed scheduling/publication result. Write action identity before dispatch and save the response immediately; do not modify accepted generation ledgers to store publishing state.
+- `ledger.json`: one publishing action identity per final video/channel/product/time, submission state, returned `schedule_id`/`log_id`, observed platform state, and a separate post-schedule audit verdict/evidence reference. Write action identity before dispatch and save the response immediately; do not modify accepted generation ledgers to store publishing state.
 
 Keep these files compact and reference existing QA/evidence files by path and digest. They describe evidence; never fabricate evidence or an approval event to satisfy a field.
 
@@ -35,14 +39,14 @@ Keep these files compact and reference existing QA/evidence files by path and di
 
 1. Only now read `../../zibuyu-popboom-auto-publish/SKILL.md`. If the bundled copy is inaccessible, use the retained standalone `$CODEX_HOME/skills/zibuyu-popboom-auto-publish/SKILL.md` and disclose the fallback.
 2. Use saved input. If account, PID, or date cannot be resolved from the accepted batch and the user's request, ask for all missing publishing fields once. Do not ask again for known model/market/video/caption information or delay the already completed video delivery.
-3. Resolve the live full channel and exact product, verify full-caption transport, calculate future local-time slots, and show the final concrete publishing table under that skill. No real publish call before that table is authorized. Reuse an already authorized identical table instead of requesting duplicate confirmation.
-4. Immediately before dispatch, rerun the handoff helper and compare the relevant source/video/copy bindings with the approved manifest. Refresh changed or expired channel, product, URL, or schedule facts. If an actual publishing payload changes, update the table and authorize the changed scope before submitting.
-5. Execute only the approved rows, persist each response, and verify with `check_publish`. Existing IDs are query-only; unknown submission results must be reconciled, never automatically resubmitted.
+3. Resolve the live full channel and exact product, apply the confirmed caption mapping, calculate future local-time slots, and show the final concrete publishing table under that skill. An explicit user request naming/reusing this video set, accounts, PID and date authorizes the resolved default table; bind it and proceed without a second routine approval. Reuse an already authorized identical table instead of requesting duplicate confirmation.
+4. Immediately before dispatch, rerun the handoff helper and compare the relevant source/video/copy bindings with the approved manifest. Refresh changed or expired channel, product, URL, or schedule facts. If an actual publishing payload changes, update the table and obtain authorization for any changed scope not already authorized. Reuse explicit existing correction authorization; an equivalent ISO-offset representation of the same approved instant does not require duplicate approval, but must be recorded in the manifest revision and exact payload.
+5. Execute only the approved rows. After each response, query its exact ID and apply the bundled [post-schedule audit](../../zibuyu-popboom-auto-publish/references/post-schedule-audit.md) before submitting the next row. Compare saved identity, complete copy and the scheduled UTC instant; missing verifiable timezone interpretation evidence means review required. Stop remaining new submissions on an unresolved or mismatched audit. Existing IDs are reconciliation targets, never invitations to resubmit.
 
 ## Completion and efficiency
 
 - Report `production_delivered`, `awaiting_publish_input`, `awaiting_publish_confirmation`, `scheduled`, `published`, `publish_failed`, or `submission_unknown` according to observed state. Do not turn a publishing blocker into a failed video job.
-- A verified future schedule completes the current scheduling request. Actual publication remains a later state. Use an explicitly available, persisted monitoring mechanism if the task includes follow-up; do not promise that the skill file alone runs in the background or claim publication before the due time.
+- The scheduling request is complete only when the whole intended set's post-schedule audits pass. Keep `scheduled`/`published` platform state distinct from audit `passed`/`needs_review`/`mismatch`; a creation receipt or a timezone-free clock value alone cannot establish a correct future schedule. Actual publication remains a later state. Use an explicitly available, persisted monitoring mechanism if the task includes follow-up; do not promise that the skill file alone runs in the background or claim publication before the due time.
 - Reuse unchanged source artifacts, validated copy, and usable PopBoom URLs. Download/upload again only for a missing or expired asset, a changed final edit, or missing QA evidence.
 - Read-only lookups may be batched after this phase opens; perform channel lookup before dependent product lookup. Keep paid submission ordering, rendering, and existing production concurrency/identity gates unchanged.
 - Editing/installing this plugin never authorizes generating or publishing real videos as a test.

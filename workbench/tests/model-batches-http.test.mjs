@@ -145,6 +145,53 @@ test(
         ['en-US', 'de-DE'],
       );
       const runDir = path.join(root, created.runId);
+      const unreviewedRepair = await fetch(
+        `${base}/api/runs/${created.runId}/resume-authorized-repair`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-zibuyu-token': token,
+          },
+          body: JSON.stringify({ confirm: true, recoveryId: randomUUID() }),
+        },
+      );
+      assert.equal(unreviewedRepair.status, 409);
+      assert.equal((await readdir(runDir)).includes('approval.json'), false);
+      // Session/runtime changes must reach an already-open detail view even
+      // when workflow.updatedAt has not changed for a long preparation stage.
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      try {
+        const stream = await fetch(`${base}/api/runs/${created.runId}/events`, {
+          signal: controller.signal,
+          headers: { cookie },
+        });
+        assert.equal(stream.status, 200);
+        const reader = stream.body.getReader();
+        await reader.read();
+        await writeFile(
+          path.join(runDir, 'web/runtime.json'),
+          JSON.stringify({
+            phase: 'prepare',
+            state: 'completed',
+            source: 'exec',
+            pid: null,
+            lastEventAt: '2026-09-07T00:00:00Z',
+            currentTask: 'SSE_RUNTIME_ONLY_UPDATE',
+          }),
+        );
+        let output = '';
+        while (!output.includes('SSE_RUNTIME_ONLY_UPDATE')) {
+          const next = await reader.read();
+          assert.equal(next.done, false);
+          output += new TextDecoder().decode(next.value);
+        }
+        await reader.cancel();
+      } finally {
+        clearTimeout(timeout);
+        controller.abort();
+      }
       const resultFile = path.join(runDir, 'web/result-prepare.json');
       const result = JSON.parse(await readFile(resultFile, 'utf8'));
       await writeFile(path.join(runDir, 'fixture.json'), '{}');

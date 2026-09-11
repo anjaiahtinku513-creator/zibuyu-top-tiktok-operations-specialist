@@ -201,7 +201,7 @@ def _release(directory, root, sources, plan=None, plan_sha=None, planned_variant
                     f"{variant_id}: director receipt compile hash drift")
     require(seen_variants == set(variants), f"Missing intended videos: {sorted(set(variants) - seen_variants)}")
 
-    delivery = validate_delivery(batch, ledger)
+    delivery = validate_delivery(batch, ledger, batch_compile_sha256=compile_sha)
     require(delivery.get("valid") is True,
             f"Delivery validator failed for {directory}: {json.dumps(delivery.get('errors'), ensure_ascii=False)}")
     items = []

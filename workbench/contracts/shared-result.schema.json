@@ -1,0 +1,67 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "inputFingerprint",
+    "outcome",
+    "summary",
+    "productFactsPath",
+    "marketAnalyses",
+    "threeViews"
+  ],
+  "properties": {
+    "inputFingerprint": {
+      "type": "string"
+    },
+    "outcome": {
+      "enum": ["ready", "blocked", "needs_input", "failed"]
+    },
+    "summary": {
+      "type": "string"
+    },
+    "productFactsPath": {
+      "type": "string"
+    },
+    "marketAnalyses": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["marketCode", "locale", "sourceUrl", "path"],
+        "properties": {
+          "marketCode": {
+            "type": "string"
+          },
+          "locale": {
+            "type": "string"
+          },
+          "sourceUrl": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "threeViews": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["variantId", "path", "qaPath"],
+        "properties": {
+          "variantId": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "qaPath": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}
